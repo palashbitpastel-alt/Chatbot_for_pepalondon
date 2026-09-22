@@ -342,8 +342,9 @@ async def support_size(req: SizeRequest) -> dict:
 
 @router.get("/support/offer")
 async def support_offer() -> dict:
-    """The multi-item discount tiers, for the bag strip. Empty tiers: feature off."""
-    return {"tiers": multi_buy.tiers()}
+    """The store's multi-item tiers, read from its own automatic discounts.
+    Empty when none are set up - the widget then shows no offer."""
+    return {"tiers": await multi_buy.tiers()}
 
 
 @router.get("/support/history")
@@ -438,7 +439,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         briefing = f"{briefing}\n{who}" if briefing else who
     bag_offer = None
     if req.cart and req.cart.items:
-        bag_offer = multi_buy.summary(req.cart.item_count,
+        bag_offer = multi_buy.summary(await multi_buy.tiers(), req.cart.item_count,
                                       shopify_storefront.minor_to_major(req.cart.total_price),
                                       req.cart.currency)
         if line := multi_buy.headline(bag_offer):
@@ -503,7 +504,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                         yield _sse("welcome_back", back)
                 except Exception:  # noqa: BLE001 - a greeting must not fail on order history
                     logger.warning("Could not build the welcome-back panel", exc_info=True)
-            welcome["offer"] = {"tiers": multi_buy.tiers()}
+            welcome["offer"] = {"tiers": await multi_buy.tiers()}
             done_payload = {"session_id": session_id, "reply": greeting, **welcome}
             if cart_payload:
                 done_payload["cart"] = cart_payload

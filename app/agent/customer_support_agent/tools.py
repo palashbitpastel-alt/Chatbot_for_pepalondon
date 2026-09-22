@@ -242,7 +242,8 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
         result = await outfit.build_outfit(items, budget or None)
         if result.get("outfit"):
             pieces = sum(int(i.get("quantity") or 1) for i in result["outfit"])
-            result["multi_buy"] = multi_buy.summary(pieces, result.get("total"), result.get("currency"))
+            result["multi_buy"] = multi_buy.summary(await multi_buy.tiers(), pieces,
+                                                      result.get("total"), result.get("currency"))
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("build_outfit", exc)

@@ -1,35 +1,79 @@
-"""Multi-item discount: 10% off two pieces, 15% off three or more.
+"""Multi-item discount: e.g. 10% off two pieces, 15% off three or more.
 
-The discount itself lives in Shopify as automatic discounts, so checkout applies
-it whatever the chat says. This module only does the arithmetic the storefront
-shows beside a bag or a look - which tier the shopper is on, how many more
-pieces reach the next one, and what they save - so the chat can say "add one
-more for 15% off" and be right about it.
+The discount is the merchant's own: automatic discounts set up in Shopify, which
+checkout applies whatever the chat says. This module reads those discounts and
+does the arithmetic the storefront shows beside a bag or a look - which tier the
+shopper is on, how many more pieces reach the next one, and what they save - so
+the chat can say "add one more for 15% off" and be right about it.
 
-Tiers come from SUPPORT_MULTI_ITEM_TIERS ("2:10,3:15") and must match the
-automatic discounts set up in the store. Empty turns the feature off.
+A tier is any ACTIVE automatic basic discount with a minimum item quantity and a
+percentage off. Change or end them in Shopify admin and the chat follows within
+TIER_CACHE_SECONDS. None set up means no offer is shown.
 """
 
+import logging
+import time
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.core.config import settings
+from app.services.shopify_client import ShopifyError, graphql
+
+logger = logging.getLogger(__name__)
 
 CENT = Decimal("0.01")
+TIER_CACHE_SECONDS = 600
+
+TIERS_QUERY = """
+query MultiItemTiers {
+  automaticDiscountNodes(first: 50, query: "status:active") {
+    nodes {
+      automaticDiscount {
+        __typename
+        ... on DiscountAutomaticBasic {
+          status
+          minimumRequirement { __typename ... on DiscountMinimumQuantity { greaterThanOrEqualToQuantity } }
+          customerGets { value { __typename ... on DiscountPercentage { percentage } } }
+        }
+      }
+    }
+  }
+}
+"""
+
+_cache: tuple[float, list[dict]] | None = None
 
 
-def tiers() -> list[dict]:
-    """[{"min_items": 2, "percent": 10}, ...], smallest first. Bad entries are skipped."""
-    parsed: dict[int, int] = {}
-    for part in (settings.SUPPORT_MULTI_ITEM_TIERS or "").split(","):
-        count, _, percent = part.strip().partition(":")
-        if count.strip().isdigit() and percent.strip().isdigit():
-            if int(count) >= 2 and 0 < int(percent) < 100:
-                parsed[int(count)] = int(percent)
-    return [{"min_items": c, "percent": parsed[c]} for c in sorted(parsed)]
+def _parse(nodes: list[dict]) -> list[dict]:
+    """[{"min_items": 2, "percent": 10}, ...] from the store's automatic discounts."""
+    best: dict[int, int] = {}
+    for node in nodes:
+        d = node.get("automaticDiscount") or {}
+        if d.get("__typename") != "DiscountAutomaticBasic" or d.get("status") != "ACTIVE":
+            continue
+        qty = ((d.get("minimumRequirement") or {}).get("greaterThanOrEqualToQuantity"))
+        pct = (((d.get("customerGets") or {}).get("value") or {}).get("percentage"))
+        try:
+            count, percent = int(qty), round(float(pct) * 100)
+        except (TypeError, ValueError):
+            continue
+        if count >= 2 and 0 < percent < 100:
+            best[count] = max(percent, best.get(count, 0))
+    return [{"min_items": c, "percent": best[c]} for c in sorted(best)]
 
 
-def enabled() -> bool:
-    return bool(tiers())
+async def tiers() -> list[dict]:
+    """The store's multi-item tiers, smallest first. [] when none are set up or
+    the store cannot be read - the chat then simply shows no offer."""
+    global _cache
+    if _cache and time.monotonic() - _cache[0] < TIER_CACHE_SECONDS:
+        return _cache[1]
+    try:
+        data = await graphql(TIERS_QUERY)
+        ladder = _parse(data["automaticDiscountNodes"]["nodes"])
+    except (ShopifyError, KeyError) as exc:
+        logger.warning("Could not read the store's automatic discounts: %s", exc)
+        ladder = _cache[1] if _cache else []
+    _cache = (time.monotonic(), ladder)
+    return ladder
 
 
 def _money(value) -> Decimal:
@@ -39,13 +83,12 @@ def _money(value) -> Decimal:
         return Decimal("0.00")
 
 
-def summary(item_count: int, subtotal, currency: str | None = None) -> dict | None:
-    """Where this many items and this subtotal sit on the tiers.
+def summary(ladder: list[dict], item_count: int, subtotal, currency: str | None = None) -> dict | None:
+    """Where this many items and this subtotal sit on the tiers (from ``tiers()``).
 
-    None when the feature is off. Money comes back as plain floats in the
+    None when the store has no tiers. Money comes back as plain floats in the
     shop's currency, ready to print.
     """
-    ladder = tiers()
     if not ladder:
         return None
     count = max(0, int(item_count or 0))

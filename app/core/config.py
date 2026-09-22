@@ -92,12 +92,6 @@ class Settings(BaseSettings):
     # Categories are grouped from the live catalogue, which barely moves.
     SUPPORT_CATEGORY_CACHE_MINUTES: int = 30
 
-    # Multi-item discount tiers as "items:percent", smallest first. They must match
-    # the automatic discounts set up in Shopify - this only drives what the chat
-    # shows ("add 1 more for 15% off"); checkout applies the real discount. Empty
-    # turns the feature off.
-    SUPPORT_MULTI_ITEM_TIERS: str = "2:10,3:15"
-
     # Signed sign-in from the theme. The widget sends the customer's id and email
     # with an HMAC the theme computes server-side (Liquid's hmac_sha256) using this
     # same secret, so the backend can trust who is signed in without taking the
