@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     # error anyone would recognise. So match myshopify hosts by pattern instead
     # of listing them, and keep CORS_ORIGINS for custom domains.
     # Set to "" to allow nothing but the list above.
-    CORS_ORIGIN_REGEX: str = r"https://[a-z0-9][a-z0-9-]*\.myshopify\.com"
+    # Theme previews and shared preview links live on shopifypreview.com, so a
+    # widget tested there was refused before it could say a word.
+    CORS_ORIGIN_REGEX: str = r"https://[a-z0-9][a-z0-9-]*\.(?:myshopify|shopifypreview)\.com"
 
     # LLM (DeepSeek, OpenAI-compatible)
     DEEPSEEK_API_KEY: str = ""
