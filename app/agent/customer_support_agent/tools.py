@@ -113,6 +113,14 @@ async def remove_from_cart(products: list[str] | None = None, everything: bool =
     asked = [p for p in (products or []) if p and p.strip()]
     if not asked and len(lines) == 1:
         asked = [lines[0].title or ""]
+    if not asked:
+        # "Remove from cart" with several things in it: which, or all of them?
+        return json.dumps({
+            "done": False,
+            "which_one": [{"asked_for": "", "lines": [
+                f"{l.title} ({l.variant_title})" if l.variant_title else l.title for l in lines]}],
+            "tell_customer": "Ask which of these to remove, or whether to empty the whole bag.",
+        }, ensure_ascii=False)
     updates: dict[str, int] = {}
     removed, not_in_bag, which_one = [], [], []
     for name in asked:
