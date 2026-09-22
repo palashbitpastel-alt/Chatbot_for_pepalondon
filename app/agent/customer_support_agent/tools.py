@@ -274,6 +274,27 @@ async def find_size(product: str = "", age: float = 0, height_cm: float = 0,
 
 
 @tool
+async def list_categories() -> str:
+    """Every category we sell, by name, with how many pieces in each. No arguments.
+
+    Use for "what categories do you have", "list your categories", "what kinds of
+    things do you sell". The storefront draws each as a tile, so name them all in
+    one short sentence and stop - no descriptions, no counts, no list of products.
+    """
+    try:
+        found = await shopify_storefront.categories()
+        return json.dumps({
+            "count": found["count"],
+            "categories": [
+                {k: c.get(k) for k in ("id", "name", "image", "image_alt", "url", "product_count")}
+                for c in found["categories"]
+            ],
+        }, ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("list_categories", exc)
+
+
+@tool
 async def browse_category(category: str) -> str:
     """Every product in ONE category the shopper named or tapped.
 
@@ -284,7 +305,8 @@ async def browse_category(category: str) -> str:
 
     Use this whenever a shopper wants a category rather than one named product:
     "show me dresses", "what is in Winter Luxe", or a bare category name arriving
-    on its own. Prefer it over search_products for a category - it returns the
+    on its own. Who it is for counts too: "girls", "for boys", "baby" return the
+    pieces tagged for them. Prefer it over search_products for a category - it returns the
     whole category, in stock, rather than a keyword guess.
 
     found=false means we have no such category, and it hands back the ones we do
@@ -466,6 +488,7 @@ async def confirm_order_change(
 
 CUSTOMER_SUPPORT_TOOLS = [
     search_products,
+    list_categories,
     browse_category,
     get_best_sellers,
     suggest_pieces,

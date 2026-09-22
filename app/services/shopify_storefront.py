@@ -1265,15 +1265,49 @@ async def _named_like(term: str, currency: str, limit: int) -> list[dict]:
     return [_public_product(node, currency) for node in data["products"]["nodes"]]
 
 
+# "Girls", "for boys", "baby things" are not product types - they are who a piece
+# is for, and the store records that as a tag. Without this, "anything for girls?"
+# came back as "we don't have a girls category" in a shop full of girls' dresses.
+_AUDIENCE_WORDS = {
+    "girl": "Girls", "girls": "Girls", "daughter": "Girls",
+    "boy": "Boys", "boys": "Boys", "son": "Boys",
+    "baby": "Baby", "babies": "Baby", "newborn": "Baby",
+}
+_AUDIENCE_FILLER = {"for", "a", "the", "my", "s", "products", "product", "items", "things", "stuff",
+                    "clothes", "clothing", "range", "collection", "section", "wear", "only", "specifically"}
+
+
+def _audience_category(category: str) -> dict | None:
+    """A tag-backed category for "girls" / "for boys" / "baby items", else None.
+
+    Only when the words are nothing BUT the audience - "girls dresses" is a
+    dress search, left to the ordinary category lookup.
+    """
+    words = [w for w in re.findall(r"[a-z]+", (category or "").lower()) if w not in _AUDIENCE_FILLER]
+    if len(words) != 1 or words[0] not in _AUDIENCE_WORDS:
+        return None
+    tag = _AUDIENCE_WORDS[words[0]]
+    return {
+        "id": tag.lower(),
+        "name": tag,
+        "kind": "audience",
+        "image": None,
+        "url": f"https://{store_domain()}/collections/all/{tag.lower()}",
+        "product_count": None,
+        "filter": f'tag:"{tag}"',
+    }
+
+
 async def category_products(category: str, limit: int = 12) -> dict:
     """Everything buyable in one category, for a shopper who named or tapped it.
 
     Only ACTIVE products, like every other read here. found=false carries the
     categories that do exist, so a caller can offer real ones rather than
-    apologising into a void.
+    apologising into a void. "Girls", "boys" and "baby" read the store's
+    audience tags.
     """
     limit = max(1, min(limit, CATEGORY_PRODUCT_LIMIT))
-    found = await find_category(category)
+    found = _audience_category(category) or await find_category(category)
     if found is None:
         listed = await _grouped_categories()
         return {
@@ -1289,15 +1323,27 @@ async def category_products(category: str, limit: int = 12) -> dict:
         }
 
     currency = (await shop_info())["currency"]
-    data = await graphql(
-        CATEGORY_PRODUCT_LIST,
-        {
-            "query": f'{found["filter"]} AND status:ACTIVE',
-            "first": limit,
-            "variants": VARIANT_LIMIT,
-        },
-    )
-    products = [_public_product(node, currency) for node in data["products"]["nodes"]]
+
+    async def fetch(product_filter: str) -> list[dict]:
+        data = await graphql(
+            CATEGORY_PRODUCT_LIST,
+            {"query": f"{product_filter} AND status:ACTIVE", "first": limit, "variants": VARIANT_LIMIT},
+        )
+        return [_public_product(node, currency) for node in data["products"]["nodes"]]
+
+    products = await fetch(found["filter"])
+    if not products and found.get("kind") == "audience":
+        # Not every store tags who a piece is for. Fall back to a collection of
+        # that name ("Girls"), then to pieces that say it themselves ("Girls'
+        # Party Dress") - a shop full of girls' dresses must never answer "none".
+        by_name = await find_category(category)
+        if by_name is not None:
+            products = await fetch(by_name["filter"])
+            if products:
+                found = by_name
+        if not products:
+            word = found["name"].rstrip("s").lower()
+            products = await fetch(f"({word} OR {word}s OR {word}'s)")
 
     # The shelf is not the only place the word appears. Anything actually called
     # what they asked for belongs in the answer too, whatever category it is

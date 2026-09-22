@@ -300,6 +300,14 @@ class CardCollector:
                 action = None
             if isinstance(action, dict) and action.get("type"):
                 self.actions.append(action)
+        if tool_name == "list_categories" and output:
+            try:
+                listed = [c for c in (json.loads(output).get("categories") or []) if c.get("name")]
+            except (TypeError, ValueError, AttributeError):
+                listed = []
+            if listed:
+                self.categories = {"categories": listed[:MAX_CARDS]}
+            return None
         if tool_name == "browse_category" and output:
             try:
                 found = json.loads(output)
