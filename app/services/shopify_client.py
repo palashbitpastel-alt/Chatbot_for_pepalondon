@@ -6,7 +6,9 @@ one place. Callers pass a named operation and variables — never an
 agent-composed query string, so a shopper can never steer what is asked for.
 """
 
+import asyncio
 import logging
+import time
 
 import httpx
 
@@ -22,7 +24,10 @@ class ShopifyError(RuntimeError):
 
 
 def is_configured() -> bool:
-    return bool(settings.SHOPIFY_STORE_URL and settings.SHOPIFY_ACCESS_TOKEN)
+    has_credentials = settings.SHOPIFY_ACCESS_TOKEN or (
+        settings.SHOPIFY_CLIENT_ID and settings.SHOPIFY_CLIENT_SECRET
+    )
+    return bool(settings.SHOPIFY_STORE_URL and has_credentials)
 
 
 def store_domain() -> str:
@@ -32,6 +37,44 @@ def store_domain() -> str:
 
 def graphql_url() -> str:
     return f"https://{store_domain()}/admin/api/{settings.SHOPIFY_API_VERSION}/graphql.json"
+
+
+_token: str | None = None
+_token_expires_at = 0.0
+_token_lock = asyncio.Lock()
+
+
+async def access_token(force_refresh: bool = False) -> str:
+    """The Admin API token to send.
+
+    A fixed SHOPIFY_ACCESS_TOKEN wins when set. Otherwise the token comes from
+    the client credentials grant, which Dev Dashboard apps use and which only
+    lives 24 hours, so it is fetched on demand and renewed an hour early.
+    """
+    global _token, _token_expires_at
+    if settings.SHOPIFY_ACCESS_TOKEN:
+        return settings.SHOPIFY_ACCESS_TOKEN
+    async with _token_lock:
+        if _token and not force_refresh and time.monotonic() < _token_expires_at:
+            return _token
+        try:
+            async with httpx.AsyncClient() as c:
+                response = await c.post(
+                    f"https://{store_domain()}/admin/oauth/access_token",
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": settings.SHOPIFY_CLIENT_ID,
+                        "client_secret": settings.SHOPIFY_CLIENT_SECRET,
+                    },
+                    timeout=TIMEOUT,
+                )
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPError as exc:
+            raise ShopifyError(f"Could not get a Shopify access token: {exc}") from exc
+        _token = body["access_token"]
+        _token_expires_at = time.monotonic() + max(int(body.get("expires_in", 86399)) - 3600, 60)
+        return _token
 
 
 _scopes: set[str] | None = None
@@ -74,12 +117,18 @@ async def graphql(query: str, variables: dict | None = None, client: httpx.Async
         raise ShopifyError("Shopify is not configured (missing store URL or access token)")
 
     async def _post(c: httpx.AsyncClient) -> dict:
-        response = await c.post(
-            graphql_url(),
-            json={"query": query, "variables": variables or {}},
-            headers={"X-Shopify-Access-Token": settings.SHOPIFY_ACCESS_TOKEN},
-            timeout=TIMEOUT,
-        )
+        async def send(token: str) -> httpx.Response:
+            return await c.post(
+                graphql_url(),
+                json={"query": query, "variables": variables or {}},
+                headers={"X-Shopify-Access-Token": token},
+                timeout=TIMEOUT,
+            )
+
+        response = await send(await access_token())
+        if response.status_code == 401 and not settings.SHOPIFY_ACCESS_TOKEN:
+            # Revoked or rotated early: fetch a fresh one and try once more.
+            response = await send(await access_token(force_refresh=True))
         response.raise_for_status()
         return response.json()
 
