@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.services import compare, handbook, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
+from app.services import compare, extras, handbook, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
 from app.services import shopper_identity as identity
 from app.services.shopify_client import ShopifyError, store_domain
 
@@ -227,6 +227,103 @@ async def edit_cart_item(product: str = "", size: str = "", color: str = "", qua
         "action": {"type": "swap_cart", "remove": str(line.variant_id),
                    "add": {"variant_id": new["variant_id"], "quantity": new_qty}},
     }, ensure_ascii=False)
+
+
+@tool
+async def product_details(product: str) -> str:
+    """Everything the store says about ONE product: full description, fabric, care,
+    colours, sizes, made in. Use for any question about a product itself - "is it
+    machine washable?", "what is it made of?", "does it have pockets?", "is it
+    lined?". product: its name as they said it ("this" = the one they are viewing).
+    Answer only from what it returns; if it is not there, say the product page does
+    not say and offer our team. Never guess a care instruction or a fabric.
+    """
+    try:
+        return json.dumps(await extras.product_details(product), ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("product_details", exc)
+
+
+@tool
+async def apply_discount_code(code: str) -> str:
+    """Check a discount code and put it on their bag. code: exactly as they typed it.
+
+    valid=true: the storefront applies it - say it is on, with its summary in a few
+    words; checkout shows the saving once the bag qualifies. valid=false: say plainly
+    that the code is not valid or has ended, never why beyond that.
+    """
+    try:
+        return json.dumps(await extras.discount_code(code), ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("apply_discount_code", exc)
+
+
+@tool
+async def delivery_estimate(country: str = "", by: str = "") -> str:
+    """When an order placed now would arrive. For "will it arrive before Saturday?",
+    "how long is delivery?", "can I get it by the 26th?".
+
+    country: ISO code if they said where ("GB", "IE", "US"), else empty.
+    by: the day or date they need it by, as said ("saturday", "26/09"), else empty.
+    Relay arrives_between per method and, with a target, by_target (yes/maybe/no) -
+    never work out dates yourself. available=false: relay tell_customer. A method with
+    no stated delivery time: give its name and price, never a date.
+    """
+    try:
+        return json.dumps(await extras.delivery_estimate(country, by), ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("delivery_estimate", exc)
+
+
+@tool
+async def save_to_wishlist(product: str) -> str:
+    """Save a product to their wishlist ("Saved for her"). product: as they named it;
+    "this"/"it" = the one they are viewing or were just shown. done=true: confirm in
+    one line."""
+    try:
+        card = await extras.product_card(product)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("save_to_wishlist", exc)
+    if not card.get("found"):
+        return json.dumps(card, ensure_ascii=False)
+    item = {k: card.get(k) for k in ("product_id", "variant_id", "title", "image", "url", "currency")}
+    item["price"] = card.get("price_from")
+    return json.dumps({"done": True, "saved": card["title"], "action": {"type": "save_item", "item": item}},
+                      ensure_ascii=False)
+
+
+@tool
+async def show_saved_items() -> str:
+    """Their wishlist ("Saved for her"). No arguments. The storefront draws the
+    cards: one line, how many and nothing else. Empty: say so and offer to help."""
+    saved = identity.current_saved()
+    items = [{"product_id": s.get("product_id"), "variant_id": s.get("variant_id"), "title": s.get("title"),
+              "image": s.get("image"), "url": s.get("url"), "price": s.get("price")}
+             for s in saved if isinstance(s, dict) and s.get("title")]
+    return json.dumps({"count": len(items), "heading": "Saved for her", "products": items}, ensure_ascii=False)
+
+
+@tool
+async def remove_from_wishlist(product: str) -> str:
+    """Take something off their wishlist. product: as they named it."""
+    want = _cart_words(product or "")
+    saved = [s for s in identity.current_saved() if isinstance(s, dict) and s.get("title")]
+    scored = sorted(((len(want & _cart_words(s["title"])), s) for s in saved), key=lambda x: -x[0])
+    if not scored or scored[0][0] == 0:
+        return json.dumps({"done": False, "not_saved": product,
+                           "saved": [s["title"] for s in saved]}, ensure_ascii=False)
+    item = scored[0][1]
+    return json.dumps({"done": True, "removed": item["title"],
+                       "action": {"type": "unsave_item", "title": item["title"],
+                                  "product_id": item.get("product_id"), "url": item.get("url")}},
+                      ensure_ascii=False)
+
+
+@tool
+async def forget_my_preferences() -> str:
+    """Forget what we remembered about them (who they shop for, age, size, colour).
+    For "forget my details", "start fresh", "that's not my daughter's size any more"."""
+    return json.dumps({"done": True, "action": {"type": "forget_profile"}})
 
 
 @tool
@@ -644,7 +741,14 @@ CUSTOMER_SUPPORT_TOOLS = [
     add_to_cart,
     remove_from_cart,
     edit_cart_item,
+    apply_discount_code,
     go_to_checkout,
+    product_details,
+    delivery_estimate,
+    save_to_wishlist,
+    show_saved_items,
+    remove_from_wishlist,
+    forget_my_preferences,
     browse_catalogue,
     build_outfit,
     find_size,

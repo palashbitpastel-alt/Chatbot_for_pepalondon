@@ -69,6 +69,9 @@ _COLOURS = [
 _COLOUR_RE = re.compile(r"\b(" + "|".join(_COLOURS) + r")\b", re.I)
 
 FIELD_ORDER = ["for", "age", "occasion", "style", "colour", "budget", "size"]
+# What is worth remembering between visits: who they shop for and her size.
+# Occasion and budget belong to one shopping trip, not the next.
+REMEMBERED = ("for", "age", "size", "colour")
 LABELS = {
     "for": "For", "age": "Age", "occasion": "Occasion", "style": "Style",
     "colour": "Colour", "budget": "Budget", "size": "Size",
@@ -144,15 +147,18 @@ def _colour(text: str) -> str | None:
     return "Grey" if colour == "gray" else colour.capitalize()
 
 
-def understood(messages: list[str]) -> dict:
+def understood(messages: list[str], base: dict | None = None) -> dict:
     """Everything the shopper has told us, latest mention winning.
 
     ``messages`` are the shopper's own messages, oldest first. Returns
     {"fields": [{"key", "label", "value"}], "age": int|None} with fields in a
     fixed display order, or no fields when nothing was said yet.
     """
-    found: dict[str, str] = {}
+    found: dict[str, str] = {k: v for k, v in (base or {}).items() if k in REMEMBERED and v}
     age_years: int | None = None
+    if found.get("age") and (m := re.match(r"(\d{1,2}) year", found["age"])):
+        age_years = int(m.group(1))
+    said_age = said_size = False
     for text in messages:
         if not text or not text.strip():
             continue
@@ -160,6 +166,7 @@ def understood(messages: list[str]) -> dict:
             found["for"] = who
         if age := _age(text):
             found["age"], age_years = age[0], age[1]
+            said_age = True
         if occasion := _occasion(text):
             found["occasion"] = occasion
         if style := _first_in(text, _STYLES):
@@ -170,9 +177,11 @@ def understood(messages: list[str]) -> dict:
             found["budget"] = budget
         if size := _size(text):
             found["size"] = size
+            said_size = True
 
     # An age with no size given is still a size: a 5-year-old wears 5Y.
-    if "size" not in found and age_years:
+    # A newly given age replaces a size remembered from an older visit, too.
+    if age_years and ("size" not in found or (said_age and not said_size)):
         found["size"] = f"{age_years}Y"
 
     # "Party" as a style beside "Birthday party" says the same thing twice.

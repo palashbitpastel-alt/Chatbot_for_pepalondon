@@ -18,6 +18,8 @@ CARD_TOOLS = {
     "suggest_pieces": "products",
     "compare_products": "products",
     "recommend_for_me": "products",
+    "show_saved_items": "products",
+    "product_details": "products",
     "build_outfit": "outfit",
     "find_size": "size",
     "get_my_order_history": "orders",
@@ -36,7 +38,7 @@ WHOLE_RESULT_TOOLS = {"browse_category"}
 
 # Tools whose products are never trimmed to the wording. A comparison is every
 # product in it, whichever of them the reply happens to name in full.
-FIXED_RESULT_TOOLS = {"compare_products"}
+FIXED_RESULT_TOOLS = {"compare_products", "show_saved_items", "product_details"}
 
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
@@ -252,6 +254,9 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
             # ready to lay out as a table beside the cards.
             "difference": data.get("difference") or [],
         }
+
+    if tool_name == "product_details":
+        return {"items": [card({**data, "price": data.get("price_from")})], "currency": currency} if data.get("found") else None
 
     items = data.get("products") or []
     if not items:

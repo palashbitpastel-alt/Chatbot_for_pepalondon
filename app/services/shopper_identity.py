@@ -128,3 +128,20 @@ def reset_cart(token) -> None:
 
 def current_cart():
     return _cart.get()
+
+
+# The shopper's wishlist as the widget holds it (it lives in their browser), so
+# "show my saved" and "remove the bonnet from my saved" can be answered.
+_saved: ContextVar[list | None] = ContextVar("current_saved", default=None)
+
+
+def set_saved(items) -> object:
+    return _saved.set(list(items or []))
+
+
+def reset_saved(token) -> None:
+    _saved.reset(token)
+
+
+def current_saved() -> list:
+    return _saved.get() or []

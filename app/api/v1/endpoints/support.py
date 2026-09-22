@@ -75,6 +75,10 @@ class SupportChatRequest(BaseModel):
     cart: Cart | None = None
     customer: Customer | None = None
     context: PageContext | None = None
+    # Kept in the shopper's own browser: their wishlist, and what they told us on
+    # earlier visits (who they shop for, age, size, colour).
+    saved: list[dict] = Field(default_factory=list, max_length=30)
+    profile: dict[str, str] = Field(default_factory=dict)
 
 
 # ── Saying hello ───────────────────────────────────────────────────────────
@@ -433,6 +437,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
     if requested:
         ask = f"[They asked for exactly {requested} item(s): choose and name exactly {requested}, no more]"
         briefing = f"{briefing}\n\n{ask}" if briefing else ask
+    remembered = {k: str(v)[:40] for k, v in (req.profile or {}).items() if k in needs.REMEMBERED}
+    if remembered and req.message.strip():
+        told = "; ".join(f"{needs.LABELS[k]}: {v}" for k, v in remembered.items())
+        memo = (f"[Remembered from their earlier visits: {told}. Use these unless they say otherwise; "
+                "do not ask again for what is here.]")
+        briefing = f"{briefing}\n{memo}" if briefing else memo
     shopper = identity.resolve(req.customer)
     if shopper is not None:
         who = f"[Signed in and verified: {shopper.first_name or 'a returning customer'} - past orders and picks are available]"
@@ -452,7 +462,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # the widget as the "Understood" panel and the "Searching for" chips.
         if req.message.strip():
             said = [c for r, c in history if r == "user"] + [req.message]
-            understood = needs.understood(said)
+            understood = needs.understood(said, base=remembered)
             if understood["fields"]:
                 yield _sse("understood", understood)
 
@@ -516,6 +526,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         token = identity.set_current(shopper)
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
+        saved_token = identity.set_saved(req.saved)
         try:
             async for event in CUSTOMER_SUPPORT_AGENT.stream(with_context(req.message, briefing), history):
                 if event["type"] == "token":
@@ -537,6 +548,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset(token)
             identity.reset_session(session_token)
             identity.reset_cart(cart_token)
+            identity.reset_saved(saved_token)
 
         await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still
