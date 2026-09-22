@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+!.env.example
+*.db
+.DS_Store
+.a5c/
+
+# Shopify theme files (managed in Shopify, not this backend repo)
+/assets/
+/blocks/
+/config/
+/layout/
+/locales/
+/sections/
+/snippets/
+/templates/
+/.shopify/
