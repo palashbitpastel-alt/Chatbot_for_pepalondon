@@ -541,7 +541,11 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still
         # gets the cards without having to follow the stream.
-        cards.finalise(reply)
+        # Did this message narrow a category (colour, age, size, budget)? If not, a
+        # category browse is shown whole rather than trimmed to the names said.
+        narrowed = any(f["key"] in ("colour", "age", "size", "budget", "occasion", "style")
+                       for f in needs.understood([req.message])["fields"])
+        cards.finalise(reply, narrowed=narrowed)
         cards.limit_products(requested)
         if req.cart is not None and not req.cart.items:
             cards.drop_empty_checkout()

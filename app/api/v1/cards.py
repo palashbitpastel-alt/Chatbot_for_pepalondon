@@ -329,7 +329,7 @@ class CardCollector:
         setattr(self, name, cards)
         return name, cards
 
-    def finalise(self, reply: str) -> None:
+    def finalise(self, reply: str, narrowed: bool = True) -> None:
         """Reconcile the cards with the answer the shopper actually reads.
 
         A tool hands back everything it found - the whole catalogue, ten search
@@ -361,6 +361,12 @@ class CardCollector:
         kept = keep_mentioned(items, _without_choices(reply))
 
         if self.products_whole:
+            # "Show me dresses" is the whole shelf, however the reply sums it up
+            # ("12 pieces, from the Alice to the Royal"): trimming it to the two
+            # names in that sentence hid the other ten. Only a request that
+            # narrowed it - a colour, an age, a size, a budget - is trimmed.
+            if not narrowed:
+                return
             # A bare category browse names nothing - "here is our Dress category,
             # 7 styles" - and the grid IS the answer, so it goes whole.
             #
