@@ -28,9 +28,9 @@ from app.agent.customer_support_agent.shopper_context import (
     with_context,
 )
 from app.api.v1 import cart_actions
-from app.api.v1.cards import CardCollector
-from app.services import shopify_storefront, shopper_identity as identity
-from app.services import store_profile, suggestions
+from app.api.v1.cards import CardCollector, cards_from, _card
+from app.services import multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
+from app.services import size_finder, store_profile, suggestions
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage
 from app.db.session import AsyncSessionLocal
@@ -52,6 +52,16 @@ SSE_HEADERS = {
     "X-Accel-Buffering": "no",  # stop nginx buffering the stream
 }
 
+
+
+class SizeRequest(BaseModel):
+    """The Smart Size Finder quiz. Every answer is optional; more answers, better fit."""
+
+    product: str | None = Field(default=None, max_length=200)   # handle or title
+    age: float | None = Field(default=None, ge=0, le=16)
+    height_cm: float | None = Field(default=None, ge=40, le=190)
+    chest_cm: float | None = Field(default=None, ge=30, le=120)
+    usual_size: str | None = Field(default=None, max_length=20)
 
 
 class SupportChatRequest(BaseModel):
@@ -149,6 +159,33 @@ async def _welcome_text() -> str:
         logger.warning("Could not read the shop name for the greeting", exc_info=True)
         name = "our store"
     return f"Welcome to {name} 👋\nAsk me anything you are interested in."
+
+
+async def _welcome_back(shopper: identity.Shopper) -> dict | None:
+    """"Welcome back, Charlotte": what they bought before and what goes with it.
+
+    Only ever called for a shopper the request has proved (a signed block), since
+    it reads their order history. Empty history still greets them by name.
+    """
+    history = await shopify_storefront.customer_orders(shopper.email, limit=10)
+    orders = history.get("orders") or []
+    bought: list[dict] = []
+    seen: set = set()
+    for order in orders:
+        for line in order.get("items") or []:
+            key = line.get("product_id") or line.get("title")
+            if key and key not in seen:
+                seen.add(key)
+                bought.append(_card(line) | {"placed_on": order.get("placed_on")})
+    picks = None
+    if orders:
+        found = await outfit.recommend_from_orders(orders)
+        picks = cards_from("recommend_for_me", json.dumps(found, ensure_ascii=False))
+    return {
+        "first_name": shopper.first_name,
+        "previously_bought": bought[:4],
+        "picks": picks,
+    }
 
 
 def _sse(event: str, data: dict) -> str:
@@ -284,6 +321,58 @@ async def support_collections(
         raise HTTPException(status_code=502, detail="The store collections could not be reached.") from exc
 
 
+@router.post("/support/size")
+async def support_size(req: SizeRequest) -> dict:
+    """Smart Size Finder: the quiz's answers in, one recommended size out.
+
+    Returns recommended ("6-7Y"), age_label, fit (close | true | roomy),
+    fit_note, alternatives (the sizes either side, as sold), and the product
+    with its variants so the widget can add exactly that size to the bag.
+    found=false lists what is still_to_ask.
+    """
+    try:
+        return await size_finder.for_product(
+            req.product, age=req.age, height_cm=req.height_cm,
+            chest_cm=req.chest_cm, usual_size=req.usual_size,
+        )
+    except ShopifyError as exc:
+        logger.warning("Size finder could not read the product: %s", exc)
+        raise HTTPException(status_code=502, detail="The store catalogue could not be reached.") from exc
+
+
+@router.get("/support/offer")
+async def support_offer() -> dict:
+    """The multi-item discount tiers, for the bag strip. Empty tiers: feature off."""
+    return {"tiers": multi_buy.tiers()}
+
+
+@router.get("/support/history")
+async def support_history(session_id: str = Query(..., min_length=10, max_length=64)) -> dict:
+    """A support conversation's text, oldest first, to reopen it from the sidebar.
+
+    Session ids are random and only ever handed to the browser that started the
+    conversation, so holding one is what entitles you to read it back. Product
+    cards are not stored - the text is.
+    """
+    if not session_id.startswith(SESSION_PREFIX):
+        raise HTTPException(status_code=404, detail="No such conversation.")
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.id.asc())
+                .limit(60)
+            )
+        ).scalars().all()
+    turns = [(m.role, m.content) for m in rows]
+    return {
+        "session_id": session_id,
+        "messages": [{"role": r, "content": c} for r, c in turns],
+        "understood": needs.understood([c for r, c in turns if r == "user"]),
+    }
+
+
 @router.post("/support/chat")
 async def support_chat(req: SupportChatRequest) -> StreamingResponse:
     """Chat with the customer support agent. Replies stream back as SSE.
@@ -323,6 +412,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                  greeting?, collections?,        `action` list and the `actions`
                  actions?, cart_action?}         word
       error   - {"message"}                      the turn failed; nothing was saved
+      understood - {fields[], age}               what the shopper has asked for so far
+                                                 (age, occasion, budget, size...), for the
+                                                 "Understood" panel and search chips
+      size    - {recommended, fit_note, ...}     a Smart Size Finder answer, as /support/size
+      welcome_back - {first_name,                welcome screen, verified shoppers only:
+                 previously_bought[], picks}     past purchases and what goes with them
     """
     session_id = _resolve_session(req.session_id)
     history = [] if not req.message.strip() else await _load_history(session_id, req.message)
@@ -338,9 +433,27 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         ask = f"[They asked for exactly {requested} item(s): choose and name exactly {requested}, no more]"
         briefing = f"{briefing}\n\n{ask}" if briefing else ask
     shopper = identity.resolve(req.customer)
+    if shopper is not None:
+        who = f"[Signed in and verified: {shopper.first_name or 'a returning customer'} - past orders and picks are available]"
+        briefing = f"{briefing}\n{who}" if briefing else who
+    bag_offer = None
+    if req.cart and req.cart.items:
+        bag_offer = multi_buy.summary(req.cart.item_count,
+                                      shopify_storefront.minor_to_major(req.cart.total_price),
+                                      req.cart.currency)
+        if line := multi_buy.headline(bag_offer):
+            briefing = f"{briefing}\nMulti-item offer on their bag: {line}"
 
     async def events() -> AsyncIterator[str]:
         yield _sse("session", {"session_id": session_id, "agent": CUSTOMER_SUPPORT_AGENT.name})
+
+        # What they have asked for so far - age, occasion, budget, size - drawn by
+        # the widget as the "Understood" panel and the "Searching for" chips.
+        if req.message.strip():
+            said = [c for r, c in history if r == "user"] + [req.message]
+            understood = needs.understood(said)
+            if understood["fields"]:
+                yield _sse("understood", understood)
 
         # The widget sends the cart without imagery, so hand it straight back with
         # pictures and links. Sent before the reply so the panel can draw at once.
@@ -354,6 +467,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                     "currency": req.cart.currency,
                     "item_count": req.cart.item_count,
                     "total": shopify_storefront.minor_to_major(req.cart.total_price),
+                    "multi_buy": bag_offer,
                 }
                 yield _sse("cart", cart_payload)
             except Exception:
@@ -381,6 +495,15 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             except Exception:  # noqa: BLE001 - chips are a nicety, never a blocker
                 logger.warning("Could not build welcome suggestions", exc_info=True)
                 welcome["suggestions"] = []
+            if shopper is not None:
+                try:
+                    back = await _welcome_back(shopper)
+                    if back:
+                        welcome["welcome_back"] = back
+                        yield _sse("welcome_back", back)
+                except Exception:  # noqa: BLE001 - a greeting must not fail on order history
+                    logger.warning("Could not build the welcome-back panel", exc_info=True)
+            welcome["offer"] = {"tiers": multi_buy.tiers()}
             done_payload = {"session_id": session_id, "reply": greeting, **welcome}
             if cart_payload:
                 done_payload["cart"] = cart_payload

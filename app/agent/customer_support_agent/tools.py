@@ -16,7 +16,7 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.services import compare, handbook, order_changes, outfit, shopify_storefront, store_profile
+from app.services import compare, handbook, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
 from app.services import shopper_identity as identity
 from app.services.shopify_client import ShopifyError, store_domain
 
@@ -240,9 +240,35 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     """
     try:
         result = await outfit.build_outfit(items, budget or None)
+        if result.get("outfit"):
+            pieces = sum(int(i.get("quantity") or 1) for i in result["outfit"])
+            result["multi_buy"] = multi_buy.summary(pieces, result.get("total"), result.get("currency"))
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("build_outfit", exc)
+
+
+@tool
+async def find_size(product: str = "", age: float = 0, height_cm: float = 0,
+                    chest_cm: float = 0, usual_size: str = "") -> str:
+    """Recommend ONE size for a child, from what the shopper told you.
+
+    Use for "what size", "will it fit", a height or measurement, or "she usually
+    wears 5-6Y". product: the piece they are viewing or named ("this" = the one
+    they are viewing); empty for a general answer. Fill only what they gave you
+    (0 / "" otherwise): age in years, height_cm, chest_cm, usual_size like "5-6Y".
+    Returns recommended (e.g. "6-7Y"), fit_note (why), alternatives. The
+    storefront draws the size card itself: say the size and the fit note in one
+    line. found=false: ask for their age and height, in one question.
+    """
+    try:
+        result = await size_finder.for_product(
+            product or None, age=age or None, height_cm=height_cm or None,
+            chest_cm=chest_cm or None, usual_size=usual_size or None,
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("find_size", exc)
 
 
 
@@ -447,6 +473,7 @@ CUSTOMER_SUPPORT_TOOLS = [
     go_to_checkout,
     browse_catalogue,
     build_outfit,
+    find_size,
     check_order_status,
     request_order_change,
     confirm_order_change,

@@ -11,10 +11,16 @@ talks it into trying: it can only ask about *the* shopper, and the request has
 already decided who that is. When nothing is trusted, those tools decline and
 the ordinary order-number-plus-email flow still works.
 
-Trust comes from ``settings.TRUST_STOREFRONT_CUSTOMER``, which is off unless the
-deployment has a way to authenticate the request itself.
+Trust comes from one of two places. A signed block: the theme computes an HMAC
+over the customer's id, email and a timestamp with a secret the browser never
+sees (``SUPPORT_CUSTOMER_SIGNING_SECRET``), so a forged or edited block fails the
+check. Or ``settings.TRUST_STOREFRONT_CUSTOMER``, which trusts the bare claim and
+should stay off on a public endpoint.
 """
 
+import hashlib
+import hmac
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -49,13 +55,35 @@ def resolve(customer, trusted_email: str | None = None) -> Shopper | None:
                        first_name=getattr(customer, "first_name", None))
     if customer is None or not customer.email:
         return None
-    if not (customer.logged_in and settings.TRUST_STOREFRONT_CUSTOMER):
+    if not customer.logged_in:
+        return None
+    if not (settings.TRUST_STOREFRONT_CUSTOMER or signature_valid(customer)):
         return None
     return Shopper(
         email=customer.email.strip().casefold(),
         first_name=customer.first_name,
         customer_id=str(customer.id) if customer.id else None,
     )
+
+
+def signature_valid(customer, now: float | None = None) -> bool:
+    """Whether the theme really signed this customer block, recently.
+
+    The theme signs "<id>:<email lowercased>:<signed_at>" with Liquid's
+    hmac_sha256 filter and the shared secret. Any edit to the id or email, a
+    stale timestamp, or no secret configured at all, and this is False.
+    """
+    secret = settings.SUPPORT_CUSTOMER_SIGNING_SECRET
+    signature = getattr(customer, "signature", None)
+    signed_at = getattr(customer, "signed_at", None)
+    if not (secret and signature and signed_at and customer.id and customer.email):
+        return False
+    age = (now or time.time()) - int(signed_at)
+    if age < -300 or age > settings.SUPPORT_CUSTOMER_SIGNATURE_MAX_AGE_HOURS * 3600:
+        return False
+    message = f"{customer.id}:{customer.email.strip().lower()}:{int(signed_at)}"
+    expected = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature.strip().lower())
 
 
 def set_current(shopper: Shopper | None):

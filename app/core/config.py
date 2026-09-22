@@ -92,6 +92,22 @@ class Settings(BaseSettings):
     # Categories are grouped from the live catalogue, which barely moves.
     SUPPORT_CATEGORY_CACHE_MINUTES: int = 30
 
+    # Multi-item discount tiers as "items:percent", smallest first. They must match
+    # the automatic discounts set up in Shopify - this only drives what the chat
+    # shows ("add 1 more for 15% off"); checkout applies the real discount. Empty
+    # turns the feature off.
+    SUPPORT_MULTI_ITEM_TIERS: str = "2:10,3:15"
+
+    # Signed sign-in from the theme. The widget sends the customer's id and email
+    # with an HMAC the theme computes server-side (Liquid's hmac_sha256) using this
+    # same secret, so the backend can trust who is signed in without taking the
+    # browser's word for it - that is what unlocks "welcome back", past orders and
+    # picks based on them. Empty keeps signed-in features off (unless
+    # TRUST_STOREFRONT_CUSTOMER is on). Must match the theme setting exactly.
+    SUPPORT_CUSTOMER_SIGNING_SECRET: str = ""
+    # A signature older than this is refused, so a copied page cannot be replayed.
+    SUPPORT_CUSTOMER_SIGNATURE_MAX_AGE_HOURS: int = 24
+
     # Shopify (New Shop)
     SHOPIFY_CLIENT_ID: str = ""
     SHOPIFY_CLIENT_SECRET: str = ""

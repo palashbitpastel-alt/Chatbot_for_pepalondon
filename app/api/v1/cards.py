@@ -19,6 +19,7 @@ CARD_TOOLS = {
     "compare_products": "products",
     "recommend_for_me": "products",
     "build_outfit": "outfit",
+    "find_size": "size",
     "get_my_order_history": "orders",
     "check_order_status": "orders",
     # Not a card - a set of buttons. Same idea though: the shopper should be
@@ -228,7 +229,12 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
             "budget": data.get("budget"),
             "within_budget": data.get("within_budget"),
             "cart_items": data.get("cart_items") or [],
+            "multi_buy": data.get("multi_buy"),
         }
+
+    if tool_name == "find_size":
+        # The quiz result as it stands: the size, why, and the product it is for.
+        return data if data.get("found") else None
 
     if tool_name == "compare_products":
         items = data.get("products") or []
@@ -283,6 +289,7 @@ class CardCollector:
         self.outfit: dict | None = None
         self.orders: dict | None = None
         self.choices: dict | None = None
+        self.size: dict | None = None
 
     def take(self, tool_name: str, output: str | None) -> tuple[str, dict] | None:
         """Record a tool result. Returns (event_name, payload) when it had cards."""
@@ -402,6 +409,8 @@ class CardCollector:
             out["orders"] = self.orders
         if self.choices is not None:
             out["choices"] = self.choices
+        if self.size is not None:
+            out["size"] = self.size
         if self.categories is not None:
             out["categories"] = self.categories
         return out

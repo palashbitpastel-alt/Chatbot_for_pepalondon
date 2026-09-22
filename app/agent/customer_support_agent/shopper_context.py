@@ -53,6 +53,10 @@ class Customer(BaseModel):
     phone: str | None = None
     first_name: str | None = None
     currency: str | None = None
+    # Set by the theme, server-side, when SUPPORT_CUSTOMER_SIGNING_SECRET is
+    # configured: hmac_sha256("<id>:<email>:<signed_at>") - see shopper_identity.
+    signed_at: int | None = None
+    signature: str | None = None
 
 
 class PageContext(BaseModel):
