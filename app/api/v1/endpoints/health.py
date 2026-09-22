@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +11,9 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health_check() -> dict:
-    return {"status": "ok"}
+    # Which commit is live - Railway sets this on every deploy - so "is my push
+    # deployed yet?" is one request away.
+    return {"status": "ok", "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None}
 
 
 @router.get("/health/db")
