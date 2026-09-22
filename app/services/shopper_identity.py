@@ -110,3 +110,21 @@ def reset_session(token) -> None:
 
 def current_session() -> str | None:
     return _session.get()
+
+
+# The shopper's bag as the storefront sent it this turn, so the cart tools can
+# match "the plimsolls" to an exact line. It is only ever used to tell the
+# browser which of ITS OWN lines to change - the storefront does the change.
+_cart: ContextVar[object | None] = ContextVar("current_cart", default=None)
+
+
+def set_cart(cart) -> object:
+    return _cart.set(cart)
+
+
+def reset_cart(token) -> None:
+    _cart.reset(token)
+
+
+def current_cart():
+    return _cart.get()

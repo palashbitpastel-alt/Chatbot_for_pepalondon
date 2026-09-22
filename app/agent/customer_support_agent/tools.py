@@ -11,6 +11,7 @@ than a broken conversation.
 
 import json
 import logging
+import re
 
 from langchain_core.tools import tool
 
@@ -79,6 +80,68 @@ async def add_to_cart(items: list[dict]) -> str:
         return json.dumps(await outfit.cart_additions(items), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("add_to_cart", exc)
+
+
+_CART_NOISE = {"the", "a", "an", "my", "from", "in", "of", "and", "with", "for", "size", "colour", "color"}
+
+
+def _cart_words(text: str) -> set[str]:
+    words = (w[:-1] if len(w) > 3 and w.endswith("s") else w for w in re.findall(r"[a-z0-9]+", text.lower()))
+    return {w for w in words if w not in _CART_NOISE and len(w) > 1}
+
+
+@tool
+async def remove_from_cart(products: list[str] | None = None, everything: bool = False,
+                           quantity: int = 0) -> str:
+    """Take things out of the shopper's bag, or change how many. The storefront does it.
+
+    products: what they named, as they said it ("the plimsolls", "pink bonnet");
+      "it"/"that" with one item in the bag means that item.
+    everything: true for "empty my bag", "remove everything", "clear the cart".
+    quantity: 0 removes the item entirely; a number sets it to that many.
+    done=true: confirm in one line what came out. not_in_bag: say which you could
+    not find. which_one: more than one line matches - ask which, from the list.
+    """
+    cart = identity.current_cart()
+    lines = [line for line in (getattr(cart, "items", None) or []) if line.variant_id]
+    if not lines:
+        return json.dumps({"done": False, "reason": "bag_empty",
+                           "tell_customer": "Your bag is already empty."})
+    if everything:
+        return json.dumps({"done": True, "removed": [line.title for line in lines],
+                           "action": {"type": "clear_cart"}}, ensure_ascii=False)
+    asked = [p for p in (products or []) if p and p.strip()]
+    if not asked and len(lines) == 1:
+        asked = [lines[0].title or ""]
+    updates: dict[str, int] = {}
+    removed, not_in_bag, which_one = [], [], []
+    for name in asked:
+        want = _cart_words(name)
+        scored = []
+        for line in lines:
+            have = _cart_words(f"{line.title or ''} {line.variant_title or ''}")
+            hits = len(want & have)
+            if hits:
+                scored.append((hits, line))
+        if not scored:
+            if name.strip().lower() in ("it", "that", "this") and len(lines) == 1:
+                scored = [(1, lines[0])]
+            else:
+                not_in_bag.append(name)
+                continue
+        best = max(h for h, _ in scored)
+        top = [line for h, line in scored if h == best]
+        if len(top) > 1 and len({line.title for line in top}) > 1:
+            which_one.append({"asked_for": name, "lines": [f"{l.title} ({l.variant_title})" if l.variant_title else l.title for l in top]})
+            continue
+        for line in top:
+            updates[str(line.variant_id)] = max(0, int(quantity or 0))
+            removed.append(f"{line.title} ({line.variant_title})" if line.variant_title else line.title)
+    result: dict = {"done": bool(updates) and not which_one, "removed" if not quantity else "changed": removed,
+                    "not_in_bag": not_in_bag, "which_one": which_one}
+    if updates:
+        result["action"] = {"type": "update_cart", "updates": updates}
+    return json.dumps(result, ensure_ascii=False)
 
 
 @tool
@@ -494,6 +557,7 @@ CUSTOMER_SUPPORT_TOOLS = [
     suggest_pieces,
     compare_products,
     add_to_cart,
+    remove_from_cart,
     go_to_checkout,
     browse_catalogue,
     build_outfit,
