@@ -152,6 +152,83 @@ async def remove_from_cart(products: list[str] | None = None, everything: bool =
     return json.dumps(result, ensure_ascii=False)
 
 
+_SIZE_LIKE = re.compile(r"^(?:\d{1,2}\s*-\s*\d{1,2}\s*[ym]|\d{1,2}\s*[ym]|\d{2}(?:\.5)?|eu\s*\d{2}|xs|s|m|l|xl|one size)$", re.I)
+
+
+def _line_options(variant_title: str | None) -> tuple[str | None, str | None]:
+    """(colour, size) read off a cart line's "Pink / 5Y"."""
+    colour = size = None
+    for part in (variant_title or "").split("/"):
+        part = part.strip()
+        if not part or part.lower() == "default title":
+            continue
+        if _SIZE_LIKE.match(part):
+            size = part
+        else:
+            colour = part
+    return colour, size
+
+
+@tool
+async def edit_cart_item(product: str = "", size: str = "", color: str = "", quantity: int = 0) -> str:
+    """Change something already in the bag - its size, colour or how many.
+
+    product: the bag item they mean, as they said it ("the Alice dress"); "it"
+      with one item in the bag means that item. size / color: the NEW one they
+      asked for, empty to keep the current one. quantity: the new count, 0 to keep.
+    The storefront swaps the line itself. done=true: confirm in one line what
+    changed. needs_choice / problems: that size or colour does not exist or is
+    out of stock - say so and offer what it lists. which_one: ask which item.
+    Removing an item is remove_from_cart, not this.
+    """
+    cart = identity.current_cart()
+    lines = [line for line in (getattr(cart, "items", None) or []) if line.variant_id]
+    if not lines:
+        return json.dumps({"done": False, "reason": "bag_empty", "tell_customer": "Your bag is empty."})
+    want = _cart_words(product or "")
+    scored = [(len(want & _cart_words(f"{l.title or ''} {l.variant_title or ''}")), l) for l in lines]
+    best = max((h for h, _ in scored), default=0)
+    top = [l for h, l in scored if h == best and h > 0] or (lines if len(lines) == 1 else [])
+    if len({l.title for l in top}) != 1:
+        return json.dumps({"done": False, "which_one": [
+            f"{l.title} ({l.variant_title})" if l.variant_title else l.title for l in (top or lines)]},
+            ensure_ascii=False)
+    line = top[0]
+    old_colour, old_size = _line_options(line.variant_title)
+    new_qty = int(quantity) if quantity and int(quantity) > 0 else int(line.quantity or 1)
+    changing_variant = (size and size.strip().lower() != (old_size or "").lower()) or \
+                       (color and color.strip().lower() != (old_colour or "").lower())
+    if not changing_variant:
+        if new_qty == line.quantity:
+            return json.dumps({"done": False, "reason": "nothing_to_change",
+                               "now": f"{line.title} ({line.variant_title}) x{line.quantity}"}, ensure_ascii=False)
+        return json.dumps({"done": True, "changed": f"{line.title} now x{new_qty}",
+                           "action": {"type": "update_cart", "updates": {str(line.variant_id): new_qty}}},
+                          ensure_ascii=False)
+    try:
+        found = await outfit.cart_additions([{
+            "product": line.handle or line.title,
+            "size": (size or old_size or "").strip() or None,
+            "color": (color or old_colour or "").strip() or None,
+            "quantity": new_qty,
+        }])
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("edit_cart_item", exc)
+    if not found.get("done"):
+        found.pop("action", None)
+        return json.dumps({"done": False, **{k: found.get(k) for k in ("needs_choice", "problems")}},
+                          ensure_ascii=False)
+    new = found["lines"][0]
+    if str(new["variant_id"]) == str(line.variant_id):
+        return json.dumps({"done": False, "reason": "nothing_to_change"})
+    return json.dumps({
+        "done": True,
+        "changed": f"{line.title}: {line.variant_title} -> {new.get('option')} x{new_qty}",
+        "action": {"type": "swap_cart", "remove": str(line.variant_id),
+                   "add": {"variant_id": new["variant_id"], "quantity": new_qty}},
+    }, ensure_ascii=False)
+
+
 @tool
 async def go_to_checkout(page: str = "checkout") -> str:
     """Take the shopper to checkout - "checkout", "pay", "buy now", "place my order".
@@ -566,6 +643,7 @@ CUSTOMER_SUPPORT_TOOLS = [
     compare_products,
     add_to_cart,
     remove_from_cart,
+    edit_cart_item,
     go_to_checkout,
     browse_catalogue,
     build_outfit,
