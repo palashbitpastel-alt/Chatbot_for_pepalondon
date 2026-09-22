@@ -154,16 +154,41 @@ def recommend(age: float | None = None, height_cm: float | None = None,
         return {"found": False, "still_to_ask": ["age", "height"],
                 "tell_customer": "Tell me their age and height and I'll find the right size."}
 
-    # Answers that point at sizes far apart are a typo somewhere, not a child.
+    # Answers far apart are a typo somewhere, not a child. When one side agrees
+    # with itself - age and usual size both say 2Y, the measurements say newborn -
+    # go with that side and say which answer looks off. Only when nothing agrees
+    # is the shopper asked to check everything.
+    warning = None
     if max(said.values()) - min(said.values()) > MAX_SPREAD:
-        return {
-            "found": False,
-            "reason": "answers_disagree",
-            "points_to": {k: CHART[v].label for k, v in said.items()},
-            "tell_customer": ("Those answers point to very different sizes ("
-                              + ", ".join(f"{k} {CHART[v].label}" for k, v in said.items())
-                              + "). Could you check them? Height and usual size matter most."),
-        }
+        labels = {k: v for k, v in said.items() if k in ("age", "usual size")}
+        measures = {k: v for k, v in said.items() if k in ("height", "chest")}
+
+        def agrees(group: dict) -> bool:
+            return bool(group) and max(group.values()) - min(group.values()) <= 1
+
+        if agrees(labels) and (not agrees(measures) or len(labels) >= len(measures)):
+            trusted, odd = labels, measures
+        elif agrees(measures):
+            trusted, odd = measures, labels
+        else:
+            return {
+                "found": False,
+                "reason": "answers_disagree",
+                "points_to": {k: CHART[v].label for k, v in said.items()},
+                "tell_customer": ("Those answers point to very different sizes ("
+                                  + ", ".join(f"{k} {CHART[v].label}" for k, v in said.items())
+                                  + "). Could you check them? Height and usual size matter most."),
+            }
+        rung = max(trusted.values())
+        typical = CHART[max(0, rung - 1)].height_cm, CHART[rung].height_cm
+        shown = {"height": lambda: f"{height_cm:g} cm tall", "chest": lambda: f"a {chest_cm:g} cm chest",
+                 "age": lambda: f"age {age:g}", "usual size": lambda: f"usual size {usual_size}"}
+        warning = (f"We went by the {' and '.join(trusted)}{', which agree' if len(trusted) > 1 else ''}. "
+                   + (lambda x: x[:1].upper() + x[1:])(" and ".join(f"{shown[k]()} is more like {CHART[v].label}" for k, v in odd.items()))
+                   + (f" - a child in {CHART[rung].label} is usually about {typical[0]}-{typical[1]} cm tall"
+                      if "height" in odd else "")
+                   + ", so it's worth double-checking.")
+        said = trusted
 
     # Measurements beat labels: they are the child, a usual size is a brand's idea.
     measured = [said[k] for k in ("height", "chest") if k in said]
@@ -171,8 +196,8 @@ def recommend(age: float | None = None, height_cm: float | None = None,
     fit, fit_why = fit_of(product)
     reasons: list[str] = []
     sized_up = False
-    near_top = ((height_cm and _near_limit(height_cm, target, "height_cm"))
-                or (chest_cm and _near_limit(chest_cm, target, "chest_cm"))
+    near_top = ((height_cm and "height" in said and _near_limit(height_cm, target, "height_cm"))
+                or (chest_cm and "chest" in said and _near_limit(chest_cm, target, "chest_cm"))
                 or (usual and usual[1] > target))
     if fit == "close" and (near_top or not measured):
         target, sized_up = _clamp(target + 1), True
@@ -201,6 +226,7 @@ def recommend(age: float | None = None, height_cm: float | None = None,
                      else f"Age {band[:-1]}",
         "fit": "close" if sized_up else fit,
         "fit_note": " ".join(reasons),
+        "warning": warning,
         "sized_up": sized_up,
         "alternatives": alternatives,
         "answers": {
