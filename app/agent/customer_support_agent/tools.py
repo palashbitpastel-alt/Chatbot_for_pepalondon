@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.services import compare, extras, handbook, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
+from app.services import compare, extras, handbook, market, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
 from app.services import shopper_identity as identity
 from app.services.shopify_client import ShopifyError, store_domain
 
@@ -762,3 +762,30 @@ CUSTOMER_SUPPORT_TOOLS = [
     get_store_policies,
     search_store_handbook,
 ]
+
+
+# ── Market prices ───────────────────────────────────────────────────────────
+# Every tool that quotes a price answers in the shopper's own market (rupees in
+# India, pounds in the UK), straight from Shopify's price lists. Orders are left
+# alone: they keep the currency they were paid in.
+MARKET_PRICED = {
+    "search_products", "browse_category", "get_best_sellers", "browse_catalogue",
+    "suggest_pieces", "build_outfit", "compare_products", "recommend_for_me",
+    "product_details", "add_to_cart", "find_size",
+}
+
+
+def _priced(run):
+    async def wrapped(*args, **kwargs):
+        out = await run(*args, **kwargs)
+        try:
+            data = json.loads(out)
+        except (TypeError, ValueError):
+            return out
+        return json.dumps(await market.localize(data), ensure_ascii=False)
+    return wrapped
+
+
+for _t in CUSTOMER_SUPPORT_TOOLS:
+    if _t.name in MARKET_PRICED and getattr(_t, "coroutine", None):
+        _t.coroutine = _priced(_t.coroutine)

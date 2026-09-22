@@ -29,7 +29,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1 import cart_actions
 from app.api.v1.cards import CardCollector, cards_from, _card
-from app.services import multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
+from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import size_finder, store_profile, suggestions
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage
@@ -527,6 +527,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
         saved_token = identity.set_saved(req.saved)
+        country_token = market.set_country(req.context.country if req.context else None)
         try:
             async for event in CUSTOMER_SUPPORT_AGENT.stream(with_context(req.message, briefing), history):
                 if event["type"] == "token":
@@ -549,6 +550,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset_session(session_token)
             identity.reset_cart(cart_token)
             identity.reset_saved(saved_token)
+            market.reset_country(country_token)
 
         await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still
