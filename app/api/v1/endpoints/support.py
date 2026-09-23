@@ -147,6 +147,27 @@ async def _store_briefing(customer: Customer | None) -> str:
     return "\n".join(lines)
 
 
+async def _names_a_kind(message: str) -> bool:
+    """Did they narrow the shelf by naming a kind of piece - "just dresses"?
+
+    "Everything in 12Y" is the whole shelf and the grid is the answer; "just
+    dresses please" is not, and leaving the shelf up put seven jumpers and a
+    jacket under a reply that named one dress. The kinds are the store's own
+    product types, so this follows whatever it sells.
+    """
+    words = {w.rstrip("s") for w in re.findall(r"[a-z]+", message.lower()) if len(w) > 2}
+    if not words:
+        return False
+    try:
+        catalogue = await outfit.browse_catalogue()
+    except Exception:  # noqa: BLE001 - a card decision must not cost the reply
+        logger.debug("No catalogue to check the message against", exc_info=True)
+        return False
+    kinds = {str(p["category"]).lower().rstrip("s")
+             for p in catalogue["products"] if p.get("category")}
+    return bool(kinds & words)
+
+
 def _welcome_handles() -> list[str]:
     """The collections the merchant pinned to the welcome screen, in their order."""
     return [h.strip() for h in settings.SUPPORT_WELCOME_COLLECTIONS.split(",") if h.strip()]
@@ -683,7 +704,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # Did this message narrow a category (colour, age, size, budget)? If not, a
         # category browse is shown whole rather than trimmed to the names said.
         narrowed = any(f["key"] in ("colour", "age", "size", "budget", "occasion", "style")
-                       for f in needs.understood([req.message])["fields"])
+                       for f in needs.understood([req.message])["fields"]) \
+            or await _names_a_kind(req.message)
         cards.finalise(reply, narrowed=narrowed)
         cards.limit_products(requested)
         if req.cart is not None and not req.cart.items:
