@@ -760,8 +760,17 @@ def _size_for_age(sizes: list[str], age: int | None, oldest: int | None,
         return ""
     told = [x for x in sizes if re.search(r"\d\s*[MY]\b", x.strip().upper())]
     if told:
-        fits = [x for x in told if _fits_age([x], age)] if age is not None else []
-        return (fits or told)[0]
+        if age is None:
+            return told[0]
+        fits = [x for x in told if _fits_age([x], age)]
+        if fits:
+            return fits[0]
+        # No size for exactly this age - the Lillie dress runs 6Y then 8Y, and
+        # taking the first in the list put a seven year old in 18M. The nearest
+        # age wins, and a tie goes to the larger: children grow into a size,
+        # never out of one backwards.
+        return sorted(told, key=lambda x: (abs((_age_of(x) if _age_of(x) is not None else 99) - age),
+                                           -(_age_of(x) or 0)))[0]
     numbered = sorted((n, x) for x in sizes if (n := _size_number(x)) is not None)
     if not numbered or age is None or not oldest:
         return sizes[0]
