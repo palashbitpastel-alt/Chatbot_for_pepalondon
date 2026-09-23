@@ -13,6 +13,7 @@ a look can never contain something a shopper cannot buy.
 
 import json
 import logging
+import re
 from decimal import Decimal, InvalidOperation
 
 from app.services import occasions
@@ -550,9 +551,30 @@ NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black",
 LOOK_PIECES = 3
 
 
+def _colour_words(piece: dict) -> set[str]:
+    """Every colour word this piece answers to, its name included.
+
+    The store writes "Blue Denim" and "Baby Pink"; a shopper says "blue" and
+    "pink". Matching whole strings missed both.
+    """
+    words: set[str] = set()
+    for value in list(piece.get("colors") or []) + [piece.get("title") or ""]:
+        words |= {w for w in re.findall(r"[a-z]+", str(value).lower()) if len(w) > 2}
+    return words
+
+
+def _comes_in(piece: dict, colour: str | None) -> bool:
+    """Whether the shopper could actually have this piece in the colour they asked for."""
+    if not colour:
+        return False
+    wanted = {w for w in re.findall(r"[a-z]+", colour.lower()) if len(w) > 2}
+    return bool(wanted & _colour_words(piece))
+
+
 def _shares_colour(piece: dict, colours: list) -> bool:
-    theirs = {c.strip().lower() for c in piece.get("colors") or []}
-    return bool(theirs & {c.strip().lower() for c in colours}) or bool(theirs & NEUTRALS)
+    theirs = _colour_words(piece)
+    anchor = {w for c in colours for w in re.findall(r"[a-z]+", str(c).lower()) if len(w) > 2}
+    return bool(theirs & anchor) or bool(theirs & NEUTRALS)
 
 
 def _same_size(piece: dict, size: str | None) -> bool:
@@ -600,6 +622,11 @@ async def complete_the_look(product: str, size: str | None = None,
     if anchor is None:
         return {"found": False, "asked_for": product, "reason": "no_such_product"}
 
+    from app.services import shopper_identity as identity
+
+    # A look built for someone who asked for blue should be blue where the shop
+    # allows it - the anchor's own colours decide only what goes with what.
+    wanted_colour = identity.wants_colour()
     audience = next(iter(anchor["for"]), None)
     size = size or next((s for s in anchor["sizes"] if s), None)
     order = COMPANIONS.get(anchor["category"], DEFAULT_COMPANIONS)
@@ -615,7 +642,9 @@ async def complete_the_look(product: str, size: str | None = None,
         matches = [p for p in pool if p["category"] == category]
         if not matches:
             continue
-        matches.sort(key=lambda p: (0 if _shares_colour(p, anchor["colors"]) else 1, p["price_from"] or 0))
+        matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
+                                    0 if _shares_colour(p, anchor["colors"]) else 1,
+                                    p["price_from"] or 0))
         picked.append(matches[0])
         if len(picked) >= max(1, pieces):
             break
@@ -625,7 +654,9 @@ async def complete_the_look(product: str, size: str | None = None,
     if len(picked) < max(1, pieces):
         taken = {p["category"] for p in picked}
         rest = [p for p in pool if p["category"] not in taken]
-        rest.sort(key=lambda p: (0 if _shares_colour(p, anchor["colors"]) else 1, p["price_from"] or 0))
+        rest.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
+                                 0 if _shares_colour(p, anchor["colors"]) else 1,
+                                 p["price_from"] or 0))
         for piece in rest:
             if piece["category"] in taken:
                 continue
