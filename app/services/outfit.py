@@ -828,12 +828,20 @@ async def complete_the_look(product: str, size: str | None = None,
     # A shoe size is a number and says nothing about age, so ask the
     # conversation before giving up on knowing how old the child is.
     age = _age_of(size) or _age_of(identity.wants_size())
-    if age is None and size and (number := _size_number(size)) is not None:
-        # The anchor is a shoe: read the child back off the run of numbers, so
-        # a 21 does not come with clothes for a twelve year old.
-        run = _shoe_span(stock)
-        if run and run[1] > run[0] and oldest:
-            age = max(0, round(oldest * (number - run[0]) / (run[1] - run[0])))
+    if age is None:
+        # Nobody has said how old the child is, and the piece runs from 18 months
+        # to twelve years. Taking its first size dressed everyone as a baby and
+        # its numbers made a plimsoll a 20; the middle of what this piece is sold
+        # in is the one guess that keeps the whole look the same size.
+        ladder = sorted(a for x in (anchor["sizes"] or []) if (a := _age_of(x)))
+        if ladder:
+            age = ladder[len(ladder) // 2]
+        else:
+            numbers = sorted(_numbers_in(anchor["sizes"] or []))
+            run = _shoe_span(stock)
+            if numbers and run and run[1] > run[0] and oldest:
+                middle = numbers[len(numbers) // 2]
+                age = max(0, round(oldest * (middle - run[0]) / (run[1] - run[0])))
 
     pool = [p for p in stock if p["handle"] != anchor["handle"]
             and (p.get("role") or _category(p["title"], None)) != anchor_role]
