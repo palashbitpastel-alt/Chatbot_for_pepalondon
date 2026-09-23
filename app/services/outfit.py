@@ -229,6 +229,14 @@ async def browse_catalogue() -> dict:
                 "in_stock": any(v["availableForSale"] for v in variants),
                 "colors": options.get("Color") or options.get("Colour") or [],
                 "sizes": options.get("Size") or [],
+                # Which colour comes in which size, and whether it is there to
+                # buy. Choosing the two apart asked for combinations the shop
+                # does not sell, and the piece then fell out of the look.
+                "combinations": [
+                    {"color": _colour_of(v), "size": _option_value(v, "Size"),
+                     "available": bool(v.get("availableForSale"))}
+                    for v in variants
+                ],
                 "image": product_image(node),
                 "url": product_url(node),
             }
@@ -876,17 +884,39 @@ async def complete_the_look(product: str, size: str | None = None,
             picked.pop(max(range(len(picked)), key=lambda i: picked[i]["price_from"] or 0))
 
     def line(piece: dict) -> dict:
+        """One line of the look: a colour and size the shop sells together.
+
+        Picking the colour and the size apart asked for pairs that do not
+        exist - a raspberry plimsoll in a size only the navy comes in - and
+        the piece was quietly dropped from the look it was meant to anchor.
+        """
         item = {"handle": piece["handle"], "quantity": 1}
-        if piece["colors"]:
-            shared = {c.strip().lower() for c in anchor["colors"]} | NEUTRALS
-            item["color"] = next((c for c in piece["colors"] if c.strip().lower() in shared), piece["colors"][0])
-        if piece["sizes"]:
-            numbered = not any(re.search(r"\d\s*[MY]\b", x.strip().upper()) for x in piece["sizes"])
-            # Sizes that name an age are narrowed to the ones that fit; numbers
-            # are not - they are a run, and the child's place on it decides.
-            fits = piece["sizes"] if numbered else [
-                s for s in piece["sizes"] if _same_size({"sizes": [s]}, size)]
-            item["size"] = _size_for_age(fits or piece["sizes"], age, oldest, span)
+        real = [c for c in (piece.get("combinations") or []) if c["available"]]
+        if not real:
+            if piece["colors"]:
+                item["color"] = piece["colors"][0]
+            if piece["sizes"]:
+                item["size"] = _size_for_age(piece["sizes"], age, oldest, span)
+            return item
+
+        # Their colour first, then one that sits with the anchor, then any.
+        theirs = [c for c in real if _comes_in({"colors": [c["color"] or ""]}, wanted_colour)]
+        if not theirs:
+            shared = {x.strip().lower() for x in anchor["colors"]} | NEUTRALS
+            theirs = [c for c in real if (c["color"] or "").strip().lower() in shared]
+        choices = theirs or real
+
+        sizes = [c["size"] for c in choices if c["size"]]
+        if sizes:
+            numbered = not any(re.search(r"\d\s*[MY]\b", x.strip().upper()) for x in sizes)
+            fits = sizes if numbered else [x for x in sizes if _same_size({"sizes": [x]}, size)]
+            wanted_size = _size_for_age(fits or sizes, age, oldest, span)
+            choices = [c for c in choices if c["size"] == wanted_size] or choices
+        picked_one = choices[0]
+        if picked_one["color"]:
+            item["color"] = picked_one["color"]
+        if picked_one["size"]:
+            item["size"] = picked_one["size"]
         return item
 
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
