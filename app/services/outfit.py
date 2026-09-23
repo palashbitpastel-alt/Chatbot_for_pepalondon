@@ -806,7 +806,9 @@ async def complete_the_look(product: str, size: str | None = None,
     # A look built for someone who asked for blue should be blue where the shop
     # allows it - the anchor's own colours decide only what goes with what.
     wanted_colour = identity.wants_colour()
-    audience = next(iter(anchor["for"]), None)
+    # Whose look this is. An untagged anchor told us nothing, so a bow hairband
+    # walked into a ten year old boy's outfit; the conversation knew he was a boy.
+    audience = next(iter(anchor["for"]), None) or identity.shopping_for()
     # Whose size to build in: what was asked for, then what this conversation
     # has settled on, and only then the piece's own first size - which is its
     # smallest, and dressed a six year old as a baby.
@@ -818,6 +820,12 @@ async def complete_the_look(product: str, size: str | None = None,
     # A shoe size is a number and says nothing about age, so ask the
     # conversation before giving up on knowing how old the child is.
     age = _age_of(size) or _age_of(identity.wants_size())
+    if age is None and size and (number := _size_number(size)) is not None:
+        # The anchor is a shoe: read the child back off the run of numbers, so
+        # a 21 does not come with clothes for a twelve year old.
+        run = _shoe_span(stock)
+        if run and run[1] > run[0] and oldest:
+            age = max(0, round(oldest * (number - run[0]) / (run[1] - run[0])))
 
     pool = [p for p in stock if p["handle"] != anchor["handle"]
             and (p.get("role") or _category(p["title"], None)) != anchor_role]
@@ -873,7 +881,11 @@ async def complete_the_look(product: str, size: str | None = None,
             shared = {c.strip().lower() for c in anchor["colors"]} | NEUTRALS
             item["color"] = next((c for c in piece["colors"] if c.strip().lower() in shared), piece["colors"][0])
         if piece["sizes"]:
-            fits = [s for s in piece["sizes"] if _same_size({"sizes": [s]}, size)]
+            numbered = not any(re.search(r"\d\s*[MY]\b", x.strip().upper()) for x in piece["sizes"])
+            # Sizes that name an age are narrowed to the ones that fit; numbers
+            # are not - they are a run, and the child's place on it decides.
+            fits = piece["sizes"] if numbered else [
+                s for s in piece["sizes"] if _same_size({"sizes": [s]}, size)]
             item["size"] = _size_for_age(fits or piece["sizes"], age, oldest, span)
         return item
 
