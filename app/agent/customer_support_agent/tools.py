@@ -533,8 +533,10 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     problems listing the colours/sizes that do exist so you can swap and retry.
     
     An outfit is one of each kind of thing: a top, a bottom, shoes, a coat.
-    Never send two of the same kind - two shirts is not a look. left_out lists
-    any second one we dropped for you; say what is in the look, not what is not.
+    Never send two of the same kind - two shirts is not a look. Nor a piece for
+    the other child, nor one sized for another age, nor nightwear. left_out
+    names anything dropped for those reasons, with which: mention it in half a
+    sentence where it changes the answer, and never present it as in the look.
     """
     try:
         result = await outfit.build_outfit(items, budget or None)

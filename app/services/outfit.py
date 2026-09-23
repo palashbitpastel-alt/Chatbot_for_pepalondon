@@ -1160,6 +1160,17 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
     worn: dict[str, str] = {}
     total = Decimal("0")
 
+    # The pieces here were chosen by the agent, not by us, so everything the
+    # coordinated look checks has to be checked again: whose look it is, how old
+    # they are, and that nothing in it belongs in bed.
+    from app.services import occasions, shopper_identity as identity
+
+    for_whom = identity.shopping_for()
+    how_old = _age_of(identity.wants_size())
+    if how_old is None:
+        told = [a for i in requested if (a := _age_of(str(i.get("size") or ""))) is not None]
+        how_old = told[0] if told else None
+
     for item in requested:
         handle = str(item.get("handle", "")).strip()
         colour = item.get("color") or item.get("colour") or _their_colour_of(products.get(
@@ -1178,6 +1189,22 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         # An outfit is one of each kind of thing. Asked for a birthday look, the
         # agent once returned two shirts and a pair of plimsolls - and no
         # trousers. The first of a kind stays; a second is left out, and said so.
+        piece = {"title": product["title"],
+                 "for": [t for t in AUDIENCE_TAGS
+                         if t.lower() in {x.strip().lower() for x in (product.get("tags") or [])}],
+                 "sizes": _options_of(product).get("Size") or []}
+        if for_whom and not _for_this_child([piece], for_whom):
+            left_out.append({"title": product["title"], "reason": "for_another_child",
+                             "shopping_for": for_whom})
+            continue
+        if not _suits_age(piece, how_old):
+            left_out.append({"title": product["title"], "reason": "not_made_for_this_age",
+                             "age": how_old})
+            continue
+        if occasions.is_sleepwear(product["title"]):
+            left_out.append({"title": product["title"], "reason": "nightwear_not_an_outfit"})
+            continue
+
         role = _category(product["title"], None)
         if role in worn:
             left_out.append({"title": product["title"], "kind": role,
