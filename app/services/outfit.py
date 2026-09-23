@@ -440,20 +440,37 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
     pool = [p for p in catalogue["products"] if p["in_stock"]]
     pool = _for_this_child(pool, audience)
-    if occasion:
+    if occasion and not occasions.is_sleepwear(occasion):
         pool = [p for p in pool if p["category"] not in _NURSERY_BASICS]
+        # Asked for a wedding, shown a nightdress: it is a dress by product type.
+        pool = [p for p in pool if not occasions.is_sleepwear(p["title"])]
     if age is not None:
         pool = [p for p in pool if _fits_age(p["sizes"], age)]
     if budget:
         pool = [p for p in pool if p["price_from"] is not None and p["price_from"] <= budget]
 
     # "A dress for a wedding": show dresses, not one dress and three other things.
-    wanted_category = _named_category(category, pool) if category else None
+    in_stock = [p for p in catalogue["products"] if p["in_stock"]]
+    wanted_category = _named_category(category, pool) or _named_category(category, in_stock) \
+        if category else None
+    category_note = None
     if wanted_category:
         of_kind = [p for p in pool if p["category"] == wanted_category]
         if of_kind:
             pool = of_kind
         else:
+            # The shop does sell them, just not to this child. Saying "we have no
+            # coats" would be a lie; saying nothing at all reads as one too.
+            elsewhere = [p for p in in_stock if p["category"] == wanted_category]
+            if elsewhere:
+                whose = sorted({who for p in elsewhere for who in p["for"]})
+                category_note = {
+                    "kind": wanted_category,
+                    "none_for_this_child": True,
+                    "we_do_have": len(elsewhere),
+                    "but_only_for": ", ".join(whose) or None,
+                    "in_sizes": sorted({s for p in elsewhere for s in (p["sizes"] or [])})[:12],
+                }
             wanted_category = None
 
     colour_matched = None
@@ -489,6 +506,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "currency": catalogue["currency"],
         "known": {"for": audience, "colour": colour or None, "occasion": occasion or None,
                   "age": age, "budget": budget or None, "category": wanted_category},
+        "category_note": category_note,
         "occasion_matched": bool(occasion) and any(
             occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,

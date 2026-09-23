@@ -32,6 +32,17 @@ NEIGHBOURS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Worn to bed, whatever else the store files it under: a night dress is a dress
+# by product type, and it led the list when a shopper asked for a wedding.
+SLEEPWEAR = ("night dress", "nightdress", "nightie", "nightgown", "pyjama", "pajama",
+             "sleepsuit", "sleep suit", "sleepwear", "bedtime")
+
+
+def is_sleepwear(*parts: object) -> bool:
+    words = " ".join(str(p or "") for p in parts).lower()
+    return any(k in words for k in SLEEPWEAR)
+
+
 def of(*parts: object) -> list[str]:
     """The occasions the store's own words place this piece at, best first."""
     words = " ".join(str(p or "") for p in parts).lower()

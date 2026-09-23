@@ -472,6 +472,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     with its price. worn_for says what the store's own words place a piece at.
     occasion_matched=false means nothing in stock is written for that occasion:
     say these are the nearest rather than calling them wedding pieces.
+    category_note means we sell that kind but none suits this child - say exactly
+    that ("our coats are girls' only at the moment") and never "we have no coats".
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.
