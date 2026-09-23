@@ -146,6 +146,26 @@ def _made_in(highlights: list[str], description: str) -> str | None:
     return None
 
 
+# What a piece is for, from the store's own words - the deck compares on
+# occasion as well as fabric, and a shopper choosing between two dresses is
+# usually choosing between two occasions.
+_OCCASIONS = [
+    ("Weddings", ("wedding", "bridesmaid", "flower girl", "page boy")),
+    ("Christenings", ("christening", "baptism", "communion")),
+    ("Parties", ("party", "birthday", "celebration")),
+    ("Christmas", ("christmas", "festive", "tartan")),
+    ("Occasion wear", ("occasion", "formal", "ceremony", "special")),
+    ("Everyday", ("everyday", "play", "casual", "nursery", "school")),
+]
+
+
+def _occasions(tags: list[str] | None, text: str) -> str | None:
+    """"Weddings, Parties" - only what the tags or description actually say."""
+    words = " ".join([" ".join(tags or []), text or ""]).lower()
+    found = [label for label, keys in _OCCASIONS if any(k in words for k in keys)]
+    return ", ".join(found[:2]) or None
+
+
 def _facts(node: dict, currency: str) -> dict:
     options = {o["name"].strip().lower(): o["values"] for o in node.get("options") or []}
     colours = options.get("color") or options.get("colour") or []
@@ -167,6 +187,7 @@ def _facts(node: dict, currency: str) -> dict:
             ("Sizes", size_range),
             ("Colours", ", ".join(colours)),
             ("Fabric", fabric),
+            ("Occasion", _occasions(node.get("tags"), f"{description} {' '.join(highlights)}")),
             ("Made in", made_in),
         )
         if value

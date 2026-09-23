@@ -440,6 +440,111 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     }
 
 
+# What goes with what, by the store's own categories. First match wins, and the
+# piece being looked at is never paired with another of its own kind.
+COMPANIONS = {
+    "Dress": ("Cardigan", "Outerwear", "Shoes", "Socks", "Accessory"),
+    "Top": ("Bottoms", "Shoes", "Outerwear", "Accessory"),
+    "Bottoms": ("Top", "Shoes", "Outerwear", "Accessory"),
+    "Outerwear": ("Dress", "Top", "Bottoms", "Shoes"),
+    "Shoes": ("Dress", "Top", "Socks", "Accessory"),
+    "Accessory": ("Dress", "Top", "Shoes", "Cardigan"),
+}
+DEFAULT_COMPANIONS = ("Dress", "Top", "Bottoms", "Shoes", "Accessory")
+# Colours that sit with anything, so a look is never blocked on an exact match.
+NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
+LOOK_PIECES = 3
+
+
+def _shares_colour(piece: dict, colours: list) -> bool:
+    theirs = {c.strip().lower() for c in piece.get("colors") or []}
+    return bool(theirs & {c.strip().lower() for c in colours}) or bool(theirs & NEUTRALS)
+
+
+def _same_size(piece: dict, size: str | None) -> bool:
+    """Whether a piece comes in the size the look is being built in."""
+    if not size:
+        return True
+    from app.services.size_finder import span_of
+
+    want = span_of(size)
+    if want is None:
+        return True
+    labels = piece.get("sizes") or []
+    if not labels:
+        return True                      # one-size pieces go with everything
+    for label in labels:
+        span = span_of(label)
+        if span is None:                 # shoe sizes: not comparable to age sizes
+            return True
+        if span[0] <= want[1] and want[0] <= span[1]:
+            return True
+    return False
+
+
+async def complete_the_look(product: str, size: str | None = None,
+                            budget: float | None = None, pieces: int = LOOK_PIECES) -> dict:
+    """The coordinated outfit around the piece a shopper is looking at.
+
+    One companion per category - a cardigan, shoes, an accessory - in stock, for
+    the same child, in their size and sitting with the colours; then the whole
+    look is priced through build_outfit so every line is a real variant the
+    storefront can add to the bag.
+    """
+    catalogue = await browse_catalogue()
+    wanted = " ".join((product or "").lower().split())
+    stock = [p for p in catalogue["products"] if p["in_stock"]]
+    anchor = next((p for p in stock if p["handle"] == wanted), None)
+    if anchor is None and wanted:
+        anchor = next((p for p in stock if wanted in p["title"].lower()), None)
+    if anchor is None and wanted:
+        from app.services import compare
+
+        by_title = {p["title"].lower(): p for p in stock}
+        close = compare.matches(wanted, {t: t for t in by_title})
+        anchor = by_title[close[0]] if close else None
+    if anchor is None:
+        return {"found": False, "asked_for": product, "reason": "no_such_product"}
+
+    audience = next(iter(anchor["for"]), None)
+    size = size or next((s for s in anchor["sizes"] if s), None)
+    order = COMPANIONS.get(anchor["category"], DEFAULT_COMPANIONS)
+
+    pool = [p for p in stock if p["handle"] != anchor["handle"] and p["category"] != anchor["category"]]
+    if audience:
+        pool = [p for p in pool if not p["for"] or audience in p["for"]]
+    pool = [p for p in pool if _same_size(p, size)]
+    if budget:
+        pool = [p for p in pool if (p["price_from"] or 0) <= budget]
+
+    picked = []
+    for category in order:
+        matches = [p for p in pool if p["category"] == category]
+        if not matches:
+            continue
+        matches.sort(key=lambda p: (0 if _shares_colour(p, anchor["colors"]) else 1, p["price_from"] or 0))
+        picked.append(matches[0])
+        if len(picked) >= max(1, pieces):
+            break
+
+    def line(piece: dict) -> dict:
+        item = {"handle": piece["handle"], "quantity": 1}
+        if piece["colors"]:
+            shared = {c.strip().lower() for c in anchor["colors"]} | NEUTRALS
+            item["color"] = next((c for c in piece["colors"] if c.strip().lower() in shared), piece["colors"][0])
+        if piece["sizes"]:
+            fits = [s for s in piece["sizes"] if _same_size({"sizes": [s]}, size)]
+            item["size"] = fits[0] if fits else piece["sizes"][0]
+        return item
+
+    look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
+    look["found"] = bool(look.get("outfit"))
+    look["anchor"] = {"handle": anchor["handle"], "title": anchor["title"], "category": anchor["category"]}
+    look["size"] = size
+    look["heading"] = f"The coordinated look around the {anchor['title']}"
+    return look
+
+
 def _affinity(product: dict, categories: set[str], tags: set[str]) -> int:
     """How well a product matches what this shopper has bought before."""
     score = 0

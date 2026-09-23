@@ -461,6 +461,24 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
 
 @tool
+async def complete_the_look(product: str, size: str = "", budget: float = 0) -> str:
+    """The coordinated outfit around ONE piece - what goes with it.
+
+    For "what goes with this", "complete the look", "style this dress", or a
+    shopper looking at a piece who wants the whole outfit. product: the piece
+    they named or are viewing. size / budget: only if they said one.
+    Returns the look already priced, with its total and the exact variants; the
+    storefront draws it with a tick per piece and an add-the-look button. Say in
+    one line what you have put together and the total, nothing more.
+    """
+    try:
+        return json.dumps(await outfit.complete_the_look(product, size or None, budget or None),
+                          ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("complete_the_look", exc)
+
+
+@tool
 async def browse_catalogue() -> str:
     """Everything buyable right now, by category - use before build_outfit.
 
@@ -769,6 +787,7 @@ CUSTOMER_SUPPORT_TOOLS = [
     forget_my_preferences,
     browse_catalogue,
     build_outfit,
+    complete_the_look,
     find_size,
     check_order_status,
     request_order_change,
@@ -788,7 +807,7 @@ CUSTOMER_SUPPORT_TOOLS = [
 # alone: they keep the currency they were paid in.
 MARKET_PRICED = {
     "search_products", "browse_in_size", "browse_category", "get_best_sellers", "browse_catalogue",
-    "suggest_pieces", "build_outfit", "compare_products", "recommend_for_me",
+    "suggest_pieces", "build_outfit", "complete_the_look", "compare_products", "recommend_for_me",
     "product_details", "add_to_cart", "find_size",
 }
 

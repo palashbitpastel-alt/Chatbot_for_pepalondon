@@ -185,9 +185,21 @@ async def _welcome_back(shopper: identity.Shopper) -> dict | None:
     if orders:
         found = await outfit.recommend_from_orders(orders)
         picks = cards_from("recommend_for_me", json.dumps(found, ensure_ascii=False))
+    # "Goes with it": what completes the last thing they bought.
+    goes_with = []
+    anchor = next((b for b in bought if b.get("title")), None)
+    if anchor:
+        try:
+            look = await outfit.complete_the_look(anchor.get("handle") or anchor["title"], pieces=2)
+            goes_with = [_card(i) for i in (look.get("outfit") or [])
+                         if i.get("title") != anchor["title"]][:2]
+        except Exception:  # noqa: BLE001 - a nicety, never a blocker on the greeting
+            logger.warning("Could not build goes-with for the welcome panel", exc_info=True)
     return {
         "first_name": shopper.first_name,
         "previously_bought": bought[:4],
+        "goes_with": goes_with,
+        "goes_with_for": anchor["title"] if anchor and goes_with else None,
         "picks": picks,
     }
 
@@ -342,6 +354,35 @@ async def support_size(req: SizeRequest) -> dict:
     except ShopifyError as exc:
         logger.warning("Size finder could not read the product: %s", exc)
         raise HTTPException(status_code=502, detail="The store catalogue could not be reached.") from exc
+
+
+@router.get("/support/topup")
+async def support_topup(
+    country: str = Query(default="", max_length=2),
+    limit: int = Query(default=2, ge=1, le=4),
+) -> dict:
+    """A couple of small pieces that would take a bag to the next discount tier.
+
+    The cheapest in-stock accessories first - what the deck calls "add 1 more
+    for 10% off". Priced for the shopper's own market like everything else.
+    """
+    token = market.set_country(country)
+    try:
+        catalogue = await outfit.browse_catalogue()
+        stock = [p for p in catalogue["products"] if p["in_stock"] and p["price_from"]]
+        small = sorted(stock, key=lambda p: (0 if p["category"] in ("Accessory", "Socks") else 1, p["price_from"]))
+        picks = [
+            {"product_id": p.get("product_id"), "handle": p["handle"], "title": p["title"],
+             "price": p["price_from"], "currency": catalogue["currency"],
+             "image": p.get("image"), "url": p.get("url")}
+            for p in small[:limit]
+        ]
+        return await market.localize({"currency": catalogue["currency"], "products": picks})
+    except ShopifyError as exc:
+        logger.warning("Could not read the catalogue for a top-up: %s", exc)
+        return {"products": []}
+    finally:
+        market.reset_country(token)
 
 
 @router.get("/support/offer")

@@ -23,6 +23,8 @@ CARD_TOOLS = {
     "show_saved_items": "products",
     "product_details": "products",
     "build_outfit": "outfit",
+    "complete_the_look": "outfit",
+
     "find_size": "size",
     "get_my_order_history": "orders",
     "check_order_status": "orders",
@@ -222,7 +224,7 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
             "allow_free_text": True,
         }
 
-    if tool_name == "build_outfit":
+    if tool_name in ("build_outfit", "complete_the_look"):
         items = data.get("outfit") or []
         if not items:
             return None
