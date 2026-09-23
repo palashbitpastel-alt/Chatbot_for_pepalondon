@@ -168,7 +168,8 @@ AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
 # Pieces the store's own words place on one child or the other, where it has
 # not tagged them. A big bow hairband arrived in a ten year old boy's outfit
 # because nothing said whose it was.
-HERS = ("hairband", "headband", "bow", "frill", "ruffle", "tutu", "ballet", "pinafore")
+HERS = ("hairband", "headband", "bow", "frill", "ruffle", "tutu", "ballet", "pinafore",
+        "mary jane", "maryjane")
 HIS = ("tie", "braces", "bow tie", "waistcoat")
 
 
