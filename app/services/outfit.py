@@ -839,6 +839,21 @@ async def complete_the_look(product: str, size: str | None = None,
     # has settled on, and only then the piece's own first size - which is its
     # smallest, and dressed a six year old as a baby.
     size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
+    # Nobody has said how old the child is, and this piece is sold across
+    # several ages: guessing dressed a shopper's daughter as a toddler without
+    # ever saying so. Ask, rather than pick for them.
+    if not (size or identity.wants_size()):
+        spread = sorted({a for x in (anchor["sizes"] or []) if (a := _age_of(x)) is not None}) \
+            or sorted(set(_numbers_in(anchor["sizes"] or [])))
+        if len(spread) > 1:
+            return {
+                "found": False,
+                "reason": "need_age",
+                "product": {"handle": anchor["handle"], "title": anchor["title"]},
+                "sizes_offered": anchor["sizes"],
+                "ask": "how old the child is",
+            }
+
     ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
     oldest = max(ages) if ages else None
     anchor_role = anchor.get("role") or _category(anchor["title"], None)

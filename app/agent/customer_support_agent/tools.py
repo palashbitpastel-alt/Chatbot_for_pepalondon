@@ -490,6 +490,11 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 async def complete_the_look(product: str, size: str = "", budget: float = 0) -> str:
     """The coordinated outfit around ONE piece - what goes with it.
 
+    reason="need_age": the piece is sold across several ages and nobody has said
+    which. Ask how old they are, in one short question, and nothing else - then
+    call this again with their answer as size. Never pick an age yourself: the
+    whole look is sized from it.
+
     For "what goes with this", "complete the look", "style this dress", or a
     shopper looking at a piece who wants the whole outfit. product: the piece
     they named or are viewing. size / budget: only if they said one.
