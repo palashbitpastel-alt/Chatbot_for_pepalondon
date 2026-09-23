@@ -375,7 +375,7 @@ async def support_topup(
         for p in small[:limit]:
             # The + button adds straight to the bag, so each pick carries the
             # variant it would add - which is also what gets the market price.
-            node = await outfit.find_product(p["handle"])
+            node = await size_finder.find_product(p["handle"])
             variant = next((v for v in ((node or {}).get("variants") or {}).get("nodes") or []
                             if v.get("availableForSale")), None)
             picks.append({
