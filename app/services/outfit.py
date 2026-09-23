@@ -952,6 +952,18 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         "problems": problems,
     }
 
+    # Asked for blue and handed a burgundy pair of trousers, a shopper deserves
+    # to be told which pieces the shop simply does not make in their colour -
+    # not to be left spotting it in the pictures.
+    from app.services import shopper_identity as identity
+
+    if asked := identity.wants_colour():
+        result["asked_for_colour"] = asked
+        result["not_in_that_colour"] = [
+            line["title"] for line in chosen
+            if not _comes_in({"colors": [line.get("option") or ""], "title": line["title"]}, asked)
+        ]
+
     if budget:
         allowance = _money(budget)
         result["budget"] = float(allowance)
