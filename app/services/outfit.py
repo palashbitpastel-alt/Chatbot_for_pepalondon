@@ -28,6 +28,9 @@ from app.services.shopify_storefront import (
 logger = logging.getLogger(__name__)
 
 MAX_PRODUCTS = 50
+# How much of the catalogue a look may be built from. Paged in, so this is a
+# guard against an enormous shop rather than the size of a normal one.
+CATALOGUE_CEILING = 500
 MAX_VARIANTS = 100
 MAX_OUTFIT_ITEMS = 8
 
@@ -49,8 +52,9 @@ CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 CATALOGUE = """
-query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!) {
-  products(first: $first, query: $query, sortKey: TITLE) {
+query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!, $cursor: String) {
+  products(first: $first, after: $cursor, query: $query, sortKey: TITLE) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       legacyResourceId
       title
@@ -138,8 +142,21 @@ async def _active_products(handles: list[str] | None = None) -> list[dict]:
 
     joined = " OR ".join(f"handle:{h}" for h in handles) if handles else ""
     query = sellable(f"({joined})" if joined else "")
-    data = await graphql(CATALOGUE, {"query": query, "first": MAX_PRODUCTS, "variants": MAX_VARIANTS})
-    return data["products"]["nodes"]
+    # One page used to be the whole catalogue, so a shop with more products than
+    # that had the rest of the alphabet missing: a look could not be built around
+    # a coat whose name began with S, and the agent said we did not sell it.
+    found: list[dict] = []
+    cursor = None
+    while len(found) < CATALOGUE_CEILING:
+        data = await graphql(CATALOGUE, {"query": query, "first": MAX_PRODUCTS,
+                                         "variants": MAX_VARIANTS, "cursor": cursor})
+        page = data["products"]
+        found.extend(page["nodes"])
+        info = page.get("pageInfo") or {}
+        if not info.get("hasNextPage"):
+            break
+        cursor = info.get("endCursor")
+    return found
 
 
 # The store tags a piece Boys, Girls or Baby. Without that on the catalogue the
@@ -181,6 +198,10 @@ async def browse_catalogue() -> dict:
                 "product_id": node.get("legacyResourceId"),
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
+                # What it IS, for the store's own shelves, versus what it DOES
+                # in an outfit. A "Coat" and a "Jacket" are two product types
+                # and one role, and only the role knows what goes with what.
+                "role": _category(node["title"], None),
                 "for": _suits(node.get("tags")),
                 "occasions": occasions.of(node.get("title"), " ".join(node.get("tags") or []),
                                           node.get("description")),
@@ -561,15 +582,20 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
 # What goes with what, by the store's own categories. First match wins, and the
 # piece being looked at is never paired with another of its own kind.
+# What goes with what, by the part each piece plays rather than by the name the
+# store files it under. These are roles from the product's own name (see
+# CATEGORY_RULES): a shirt and a jumper are both "Top", a coat and a jacket are
+# both "Outerwear". Nothing here names a product, so it holds for any stock.
 COMPANIONS = {
-    "Dress": ("Cardigan", "Outerwear", "Shoes", "Socks", "Accessory"),
+    "Dress": ("Outerwear", "Shoes", "Accessory", "Top"),
     "Top": ("Bottoms", "Shoes", "Outerwear", "Accessory"),
     "Bottoms": ("Top", "Shoes", "Outerwear", "Accessory"),
-    "Outerwear": ("Dress", "Top", "Bottoms", "Shoes"),
-    "Shoes": ("Dress", "Top", "Socks", "Accessory"),
-    "Accessory": ("Dress", "Top", "Shoes", "Cardigan"),
+    "Outerwear": ("Top", "Bottoms", "Dress", "Shoes"),
+    "Shoes": ("Dress", "Top", "Bottoms", "Accessory"),
+    "Accessory": ("Dress", "Top", "Bottoms", "Shoes"),
+    "Other": ("Top", "Bottoms", "Dress", "Shoes"),
 }
-DEFAULT_COMPANIONS = ("Dress", "Top", "Bottoms", "Shoes", "Accessory")
+DEFAULT_COMPANIONS = ("Top", "Bottoms", "Shoes", "Accessory")
 # Colours that sit with anything, so a look is never blocked on an exact match.
 NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
 LOOK_PIECES = 3
@@ -599,6 +625,55 @@ def _shares_colour(piece: dict, colours: list) -> bool:
     theirs = _colour_words(piece)
     anchor = {w for c in colours for w in re.findall(r"[a-z]+", str(c).lower()) if len(w) > 2}
     return bool(theirs & anchor) or bool(theirs & NEUTRALS)
+
+
+def _age_of(size: str | None) -> int | None:
+    """The age a size label implies: "8Y" is 8, "12M" is 1, "2-3Y" is 3."""
+    if not size:
+        return None
+    label = size.strip().upper()
+    years = re.findall(r"(\d{1,2})\s*Y", label)
+    if years:
+        return int(years[-1])
+    months = re.findall(r"(\d{1,2})\s*M", label)
+    if months:
+        return max(0, round(int(months[-1]) / 12))
+    return None
+
+
+def _suits_age(piece: dict, age: int | None) -> bool:
+    """Whether a piece is sold in a size for a child this old.
+
+    Only sizes that say an age count: "S/M/L", "One Size" and shoe sizes say
+    nothing about it, so they are left alone. A dummy sold in 0-6M and 18M+ is
+    not part of a ten year old's outfit, and that is what this keeps out.
+    """
+    if age is None:
+        return True
+    told = [s for s in (piece.get("sizes") or []) if re.search(r"\d\s*[MY]\b", s.strip().upper())]
+    return _fits_age(told, age) if told else True
+
+
+def _size_for_age(sizes: list[str], age: int | None, oldest: int | None) -> str:
+    """The size to put in the bag for a child this old.
+
+    Sizes that name an age answer for themselves. Shoe sizes do not - they are
+    numbers - so they are read as a run: a child two thirds of the way up the
+    ages the shop sells takes a shoe two thirds of the way up its numbers. The
+    run and the span both come from the store, so nothing here assumes a chart.
+    """
+    if not sizes:
+        return ""
+    told = [x for x in sizes if re.search(r"\d\s*[MY]\b", x.strip().upper())]
+    if told:
+        fits = [x for x in told if _fits_age([x], age)] if age is not None else []
+        return (fits or told)[0]
+    numbered = sorted((float(m.group()), x) for x in sizes
+                      if (m := re.search(r"\d+(?:\.\d+)?", x)))
+    if not numbered or age is None or not oldest:
+        return sizes[0]
+    at = round((min(age, oldest) / oldest) * (len(numbered) - 1))
+    return numbered[max(0, min(at, len(numbered) - 1))][1]
 
 
 def _same_size(piece: dict, size: str | None) -> bool:
@@ -653,17 +728,22 @@ async def complete_the_look(product: str, size: str | None = None,
     wanted_colour = identity.wants_colour()
     audience = next(iter(anchor["for"]), None)
     size = size or next((s for s in anchor["sizes"] if s), None)
-    order = COMPANIONS.get(anchor["category"], DEFAULT_COMPANIONS)
+    ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
+    oldest = max(ages) if ages else None
+    anchor_role = anchor.get("role") or _category(anchor["title"], None)
+    order = COMPANIONS.get(anchor_role, DEFAULT_COMPANIONS)
+    age = _age_of(size)
 
-    pool = [p for p in stock if p["handle"] != anchor["handle"] and p["category"] != anchor["category"]]
+    pool = [p for p in stock if p["handle"] != anchor["handle"]
+            and (p.get("role") or _category(p["title"], None)) != anchor_role]
     pool = _for_this_child(pool, audience)
-    pool = [p for p in pool if _same_size(p, size)]
+    pool = [p for p in pool if _same_size(p, size) and _suits_age(p, age)]
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
 
     picked = []
-    for category in order:
-        matches = [p for p in pool if p["category"] == category]
+    for role in order:
+        matches = [p for p in pool if (p.get("role") or _category(p["title"], None)) == role]
         if not matches:
             continue
         matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
@@ -676,16 +756,19 @@ async def complete_the_look(product: str, size: str | None = None,
     # The named companions for this kind of piece may not all be in stock in
     # their size; rather than a look of one, fill up from whatever else suits.
     if len(picked) < max(1, pieces):
-        taken = {p["category"] for p in picked}
-        rest = [p for p in pool if p["category"] not in taken]
+        taken = {p.get("role") or _category(p["title"], None) for p in picked}
+        rest = [p for p in pool
+                if (p.get("role") or _category(p["title"], None)) in order
+                and (p.get("role") or _category(p["title"], None)) not in taken]
         rest.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
                                  0 if _shares_colour(p, anchor["colors"]) else 1,
                                  p["price_from"] or 0))
         for piece in rest:
-            if piece["category"] in taken:
+            role = piece.get("role") or _category(piece["title"], None)
+            if role in taken:
                 continue
             picked.append(piece)
-            taken.add(piece["category"])
+            taken.add(role)
             if len(picked) >= max(1, pieces):
                 break
 
@@ -696,7 +779,7 @@ async def complete_the_look(product: str, size: str | None = None,
             item["color"] = next((c for c in piece["colors"] if c.strip().lower() in shared), piece["colors"][0])
         if piece["sizes"]:
             fits = [s for s in piece["sizes"] if _same_size({"sizes": [s]}, size)]
-            item["size"] = fits[0] if fits else piece["sizes"][0]
+            item["size"] = _size_for_age(fits or piece["sizes"], age, oldest)
         return item
 
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
@@ -758,6 +841,10 @@ async def recommend_from_orders(orders: list[dict], limit: int = 4) -> dict:
                 "product_id": node.get("legacyResourceId"),
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
+                # What it IS, for the store's own shelves, versus what it DOES
+                # in an outfit. A "Coat" and a "Jacket" are two product types
+                # and one role, and only the role knows what goes with what.
+                "role": _category(node["title"], None),
                 "tags": node.get("tags") or [],
                 "price_from": float(min(prices)) if prices else None,
                 "about": _first_sentence(node.get("description")),
