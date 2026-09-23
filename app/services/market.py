@@ -84,7 +84,10 @@ def _walk(obj, variants: set, products: set) -> None:
     if isinstance(obj, dict):
         if obj.get("variant_id") and any(obj.get(k) is not None for k in VARIANT_PRICE_KEYS):
             variants.add(str(obj["variant_id"]))
-        if obj.get("product_id") and obj.get("price_from") is not None:
+        # A card with no variant of its own - a welcome pick, a saved item - is
+        # priced from its product instead.
+        if obj.get("product_id") and not obj.get("variant_id") and (
+                obj.get("price_from") is not None or obj.get("price") is not None):
             products.add(str(obj["product_id"]))
         for v in obj.values():
             _walk(v, variants, products)
@@ -130,12 +133,15 @@ def _apply(obj, vp: dict, pp: dict, state: dict) -> None:
             if obj.get("line_total") is not None:
                 obj["line_total"] = _money(Decimal(str(amount)) * int(obj.get("quantity") or 1))
         pid = str(obj.get("product_id") or "")
-        if pid in pp and obj.get("price_from") is not None:
+        if pid in pp and not obj.get("variant_id"):
             low = pp[pid]["minVariantPricing"]["price"]
             high = pp[pid]["maxVariantPricing"]["price"]
-            obj["price_from"] = _money(low["amount"])
+            if obj.get("price_from") is not None:
+                obj["price_from"] = _money(low["amount"])
             if obj.get("price_to") is not None:
                 obj["price_to"] = _money(high["amount"])
+            if obj.get("price") is not None:
+                obj["price"] = _money(low["amount"])
             state["currency"] = low["currencyCode"]
         for v in obj.values():
             _apply(v, vp, pp, state)
