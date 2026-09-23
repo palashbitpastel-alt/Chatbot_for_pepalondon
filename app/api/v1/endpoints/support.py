@@ -359,6 +359,7 @@ async def support_size(req: SizeRequest) -> dict:
 @router.get("/support/topup")
 async def support_topup(
     country: str = Query(default="", max_length=2),
+    currency: str = Query(default="", max_length=3),
     limit: int = Query(default=2, ge=1, le=4),
 ) -> dict:
     """A couple of small pieces that would take a bag to the next discount tier.
@@ -367,6 +368,7 @@ async def support_topup(
     for 10% off". Priced for the shopper's own market like everything else.
     """
     token = market.set_country(country)
+    showing = market.set_showing(currency)
     try:
         catalogue = await outfit.browse_catalogue()
         stock = [p for p in catalogue["products"] if p["in_stock"] and p["price_from"]]
@@ -391,6 +393,7 @@ async def support_topup(
         return {"products": []}
     finally:
         market.reset_country(token)
+        market.reset_showing(showing)
 
 
 @router.get("/support/offer")
@@ -614,6 +617,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         cart_token = identity.set_cart(req.cart)
         saved_token = identity.set_saved(req.saved)
         country_token = market.set_country(req.context.country if req.context else None)
+        showing_token = market.set_showing(req.context.currency if req.context else None)
         try:
             async for event in CUSTOMER_SUPPORT_AGENT.stream(with_context(req.message, briefing), history):
                 if event["type"] == "token":
@@ -637,6 +641,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset_cart(cart_token)
             identity.reset_saved(saved_token)
             market.reset_country(country_token)
+            market.reset_showing(showing_token)
 
         await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still

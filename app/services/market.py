@@ -10,6 +10,7 @@ summaries are rewritten to match. Nothing here converts with an exchange rate;
 every figure is the market's own.
 """
 
+import copy
 import logging
 import time
 from contextvars import ContextVar
@@ -21,6 +22,10 @@ from app.services.shopify_client import ShopifyError, graphql
 logger = logging.getLogger(__name__)
 
 _country: ContextVar[str | None] = ContextVar("shopper_country", default=None)
+# What the storefront itself is showing. A market price is only right if it is
+# in that money: a browser that reports Austria while the shop is serving its
+# US market would otherwise be quoted euros beside dollar cart lines.
+_showing: ContextVar[str | None] = ContextVar("storefront_currency", default=None)
 
 PRICES = """
 query MarketPrices($ids: [ID!]!, $country: CountryCode!) {
@@ -56,6 +61,15 @@ def set_country(code: str | None):
 
 def reset_country(token) -> None:
     _country.reset(token)
+
+
+def set_showing(currency: str | None):
+    code = (currency or "").strip().upper()
+    return _showing.set(code if len(code) == 3 and code.isalpha() else None)
+
+
+def reset_showing(token) -> None:
+    _showing.reset(token)
 
 
 def current_country() -> str | None:
@@ -147,6 +161,7 @@ async def localize(result):
     country = current_country()
     if not country or not isinstance(result, (dict, list)):
         return result
+    original = copy.deepcopy(result)
     variants, products = set(), set()
     _walk(result, variants, products)
     if not variants and not products:
@@ -162,6 +177,12 @@ async def localize(result):
     currency = state.get("currency")
     if not currency:
         return result
+    showing = _showing.get()
+    if showing and currency != showing:
+        # The market we were asked for is not the one the shopper is being
+        # served. Their own storefront is the honest answer, so leave it alone.
+        logger.info("Storefront is showing %s, not %s - keeping its own prices", showing, currency)
+        return original
     _relabel(result, currency)
     if isinstance(result, dict):
         # A look's total is the sum of its localized lines, and its budget was
