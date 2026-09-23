@@ -155,7 +155,7 @@ async def _names_a_kind(message: str) -> bool:
     jacket under a reply that named one dress. The kinds are the store's own
     product types, so this follows whatever it sells.
     """
-    words = {w.rstrip("s") for w in re.findall(r"[a-z]+", message.lower()) if len(w) > 2}
+    words = {store_profile._singular(w) for w in re.findall(r"[a-z]+", message.lower()) if len(w) > 2}
     if not words:
         return False
     try:
@@ -163,7 +163,7 @@ async def _names_a_kind(message: str) -> bool:
     except Exception:  # noqa: BLE001 - a card decision must not cost the reply
         logger.debug("No catalogue to check the message against", exc_info=True)
         return False
-    kinds = {str(p["category"]).lower().rstrip("s")
+    kinds = {store_profile._singular(str(p["category"]))
              for p in catalogue["products"] if p.get("category")}
     return bool(kinds & words)
 

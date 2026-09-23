@@ -85,12 +85,14 @@ def _named_category(name: str, products: list[dict]) -> str | None:
     "Coat". Match against what the catalogue actually holds rather than a list
     of our own, so a store that calls them "Outerwear" works too.
     """
-    want = " ".join((name or "").strip().lower().split()).rstrip("s")
+    from app.services.store_profile import _singular
+
+    want = _singular(" ".join((name or "").strip().lower().split()))
     if not want:
         return None
     have = {p["category"] for p in products if p.get("category")}
     for label in sorted(have, key=len):
-        lowered = label.lower().rstrip("s")
+        lowered = _singular(label)
         if lowered == want or want in lowered or lowered in want:
             return label
     guess = _category(want, None)
