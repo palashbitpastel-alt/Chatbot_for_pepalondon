@@ -179,6 +179,7 @@ def _facts(node: dict, currency: str) -> dict:
     size_range = (sizes[0] if len(sizes) == 1 else f"{sizes[0]} - {sizes[-1]}") if sizes else None
     fabric = _fabric(highlights, description)
     made_in = _made_in(highlights, description)
+    occasion = _occasions(node.get("tags"), f"{node['title']} {description} {' '.join(highlights)}")
     specs = [
         {"label": label, "value": value}
         for label, value in (
@@ -187,7 +188,7 @@ def _facts(node: dict, currency: str) -> dict:
             ("Sizes", size_range),
             ("Colours", ", ".join(colours)),
             ("Fabric", fabric),
-            ("Occasion", _occasions(node.get("tags"), f"{node['title']} {description} {' '.join(highlights)}")),
+            ("Occasion", occasion),
             ("Made in", made_in),
         )
         if value
@@ -208,6 +209,7 @@ def _facts(node: dict, currency: str) -> dict:
         "size_range": size_range,
         "fabric": fabric,
         "made_in": made_in,
+        "occasion": occasion,
         "about": _first_sentence(description),
         "highlights": highlights,
         "specs": specs,
@@ -268,6 +270,13 @@ def _contrast(products: list[dict], currency: str) -> tuple[list[str], list[dict
     else:
         row("For", audiences,
             "Who for: " + "; ".join(f"{p['title']} {a.lower()}" for p, a in zip(products, audiences)))
+
+    occasions = [p.get("occasion") for p in products]
+    if all(occasions) and len({o.lower() for o in occasions}) == 1:
+        common.append(f"{every} suit {occasions[0].lower()}")
+    elif any(occasions):
+        row("Occasion", [o or "Not stated" for o in occasions],
+            "Worn for: " + "; ".join(f"{p['title']} {(o or 'not stated').lower()}" for p, o in zip(products, occasions)))
 
     ranges = [p["size_range"] for p in products]
     if len(set(ranges)) == 1 and ranges[0]:
