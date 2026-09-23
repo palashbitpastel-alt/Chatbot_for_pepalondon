@@ -182,9 +182,20 @@ async def _welcome_back(shopper: identity.Shopper) -> dict | None:
                 seen.add(key)
                 bought.append(_card(line) | {"placed_on": order.get("placed_on")})
     picks = None
+    picks_because = None
     if orders:
         found = await outfit.recommend_from_orders(orders)
         picks = cards_from("recommend_for_me", json.dumps(found, ensure_ascii=False))
+        picks_because = "bought_before"
+    else:
+        # Signed in but nothing bought yet: still worth showing them something,
+        # and what the shop sells most is the safest thing to show.
+        try:
+            found = await shopify_storefront.best_sellers(limit=3)
+            picks = cards_from("get_best_sellers", json.dumps(found, ensure_ascii=False))
+            picks_because = "popular"
+        except Exception:  # noqa: BLE001 - a greeting must not fail on this
+            logger.warning("Could not load picks for a new customer", exc_info=True)
     # "Goes with it": what completes the last thing they bought.
     goes_with = []
     anchor = next((b for b in bought if b.get("title")), None)
@@ -201,6 +212,7 @@ async def _welcome_back(shopper: identity.Shopper) -> dict | None:
         "goes_with": goes_with,
         "goes_with_for": anchor["title"] if anchor and goes_with else None,
         "picks": picks,
+        "picks_because": picks_because,
     }
 
 
