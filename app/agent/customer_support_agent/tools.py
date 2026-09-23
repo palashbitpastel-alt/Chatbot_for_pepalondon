@@ -602,6 +602,43 @@ async def browse_in_size(size: str) -> str:
         return _fail("browse_in_size", exc)
 
 
+
+def _for_this_shopper(found: dict) -> dict:
+    """Drop the pieces meant for a different child.
+
+    A shopper who has said "my daughter" and then opens Trousers, Shorts &
+    Skirts was being shown boys' chinos: the collection is mixed, and nothing
+    downstream knew who we were shopping for. Pieces the store has not tagged
+    for anyone stay - they suit either - and the reply says what was left out,
+    so "show me the boys' ones too" still works.
+    """
+    who = identity.shopping_for()
+    products = found.get("products") if isinstance(found, dict) else None
+    if not who or not isinstance(products, list):
+        return found
+    other = {"Girls": "Boys", "Boys": "Girls"}.get(who)
+    if not other:
+        return found
+
+    def theirs(product: dict) -> bool:
+        tagged = product.get("for") or product.get("audience") or []
+        if isinstance(tagged, str):
+            tagged = [tagged]
+        if tagged:
+            return who in tagged or not (set(tagged) & {"Girls", "Boys"})
+        # Untagged: the name still gives it away often enough to matter.
+        return other.rstrip("s").lower() not in (product.get("title") or "").lower()
+
+    kept = [p for p in products if theirs(p)]
+    if len(kept) == len(products):
+        return found
+    found = dict(found)
+    found["products"] = kept
+    found["count"] = len(kept)
+    found["filtered_to"] = who
+    found["also_here_for_the_other"] = len(products) - len(kept)
+    return found
+
 @tool
 async def browse_category(category: str) -> str:
     """Every product in ONE category the shopper named or tapped.
@@ -621,15 +658,19 @@ async def browse_category(category: str) -> str:
     have: offer those instead of apologising. more_available=true means there are
     more than the ones returned.
 
+    filtered_to means the shopper has told you who they are shopping for and the
+    pieces for the other child were left out; also_here_for_the_other says how
+    many. Mention it in a half-sentence ("the boys' pieces are there too if you
+    want them") and never present them as if the whole shelf were shown.
+
     also_named_like_this lists products that are not in that category but carry
     the shopper's word in their own name - "Pyjama Trousers" for "pyjamas". They
     are already in products; say plainly that they sit under another heading
     rather than passing them off as part of the category.
     """
     try:
-        return json.dumps(
-            await shopify_storefront.category_products(category), ensure_ascii=False
-        )
+        found = await shopify_storefront.category_products(category)
+        return json.dumps(_for_this_shopper(found), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_category", exc)
 

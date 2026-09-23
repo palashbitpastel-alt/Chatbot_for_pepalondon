@@ -581,6 +581,10 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             said = [c for r, c in history if r == "user"] + [req.message]
             understood = needs.understood(
                 said, base=remembered, currency=(req.context.currency if req.context else None))
+            # Who they are shopping for, so a mixed collection comes back as
+            # theirs rather than half somebody else's.
+            identity.set_audience(next(
+                (f["value"] for f in understood["fields"] if f["key"] == "for"), None))
             if understood["fields"]:
                 yield _sse("understood", understood)
 

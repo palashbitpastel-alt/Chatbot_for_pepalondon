@@ -145,3 +145,24 @@ def reset_saved(token) -> None:
 
 def current_saved() -> list:
     return _saved.get() or []
+
+
+# Who they are shopping for, as the conversation has established it ("For: Girl"
+# in the Understood panel). A shopper who has said "my daughter" and then taps a
+# mixed collection should not be handed boys' trousers, and the model cannot be
+# relied on to remember to filter - so the tools do it.
+_audience: ContextVar[str | None] = ContextVar("shopping_for", default=None)
+
+
+def set_audience(who: str | None) -> object:
+    known = {"girl": "Girls", "girls": "Girls", "boy": "Boys", "boys": "Boys",
+             "baby": "Baby", "babies": "Baby"}
+    return _audience.set(known.get((who or "").strip().lower()))
+
+
+def reset_audience(token) -> None:
+    _audience.reset(token)
+
+
+def shopping_for() -> str | None:
+    return _audience.get()
