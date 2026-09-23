@@ -169,15 +169,24 @@ AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
 # not tagged them. A big bow hairband arrived in a ten year old boy's outfit
 # because nothing said whose it was.
 HERS = ("hairband", "headband", "bow", "frill", "ruffle", "tutu", "ballet", "pinafore",
-        "mary jane", "maryjane")
-HIS = ("tie", "braces", "bow tie", "waistcoat")
+        "mary jane", "maryjane", "floral", "scallop", "tulle", "lace", "broderie", "petal")
+HIS = ("waistcoat", "bow tie", "necktie")
+# What the store files a piece under says as much as its name does. A blouse is
+# a girl's, whatever the tags say - and these products carry no audience tag at
+# all, only "white" and "in-stock".
+HER_TYPES = ("blouse", "dress", "skirt", "pinafore", "tights")
+HIS_TYPES = ("waistcoat", "blazer")
 
 
-def _named_for(title: str, audience: str) -> bool:
-    """Whether a piece's own name puts it on the other child."""
+def _named_for(title: str, kind: str | None, audience: str) -> bool:
+    """Whether a piece's own name or product type puts it on the other child."""
     lowered = (title or "").lower()
-    other = HERS if audience == "Boys" else HIS if audience == "Girls" else ()
-    return any(word in lowered for word in other)
+    filed = (kind or "").strip().lower()
+    if audience == "Boys":
+        return any(w in lowered for w in HERS) or any(t in filed for t in HER_TYPES)
+    if audience == "Girls":
+        return any(w in lowered for w in HIS) or any(t in filed for t in HIS_TYPES)
+    return False
 
 
 def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
@@ -195,7 +204,7 @@ def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
     # Untagged, but the name says whose it is - only where the store itself has
     # not tagged the piece for this child.
     return [p for p in kept if audience in (p.get("for") or [])
-            or not _named_for(p.get("title") or "", audience)]
+            or not _named_for(p.get("title") or "", p.get("category"), audience)]
 
 
 def _suits(tags: list[str] | None) -> list[str]:
@@ -1190,6 +1199,7 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         # agent once returned two shirts and a pair of plimsolls - and no
         # trousers. The first of a kind stays; a second is left out, and said so.
         piece = {"title": product["title"],
+                 "category": product.get("productType"),
                  "for": [t for t in AUDIENCE_TAGS
                          if t.lower() in {x.strip().lower() for x in (product.get("tags") or [])}],
                  "sizes": _options_of(product).get("Size") or []}
