@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     SUPPORT_STORE_NAME: str = ""
     SUPPORT_STORE_DESCRIPTION: str = "clothes, shoes and accessories for babies and young children"
 
+    # The slice of the catalogue this assistant sells from, as a Shopify search
+    # filter - a store that also stocks something else (a sandbox full of belts
+    # and plants) would otherwise have the assistant offering it. Anything
+    # Shopify's product search accepts works: vendor:"Pepa London",
+    # tag:childrenswear, product_type:Dress OR product_type:Romper. Empty means
+    # the whole catalogue.
+    SUPPORT_CATALOGUE_FILTER: str = ""
+
     # Categories are grouped from the live catalogue, which barely moves.
     SUPPORT_CATEGORY_CACHE_MINUTES: int = 30
 

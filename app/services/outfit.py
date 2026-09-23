@@ -111,10 +111,10 @@ def _options_of(product: dict) -> dict[str, list[str]]:
 
 async def _active_products(handles: list[str] | None = None) -> list[dict]:
     """Live ACTIVE products. A draft or archived product is never returned."""
-    query = "status:ACTIVE"
-    if handles:
-        joined = " OR ".join(f"handle:{h}" for h in handles)
-        query = f"({joined}) AND status:ACTIVE"
+    from app.services.shopify_storefront import sellable
+
+    joined = " OR ".join(f"handle:{h}" for h in handles) if handles else ""
+    query = sellable(f"({joined})" if joined else "")
     data = await graphql(CATALOGUE, {"query": query, "first": MAX_PRODUCTS, "variants": MAX_VARIANTS})
     return data["products"]["nodes"]
 

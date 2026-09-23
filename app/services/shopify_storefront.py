@@ -269,6 +269,20 @@ async def shop_info() -> dict:
     return _shop_cache
 
 
+def sellable(extra: str = "") -> str:
+    """The Shopify search filter for everything this assistant may sell.
+
+    Always ACTIVE, and narrowed to SUPPORT_CATALOGUE_FILTER when the store
+    stocks more than this assistant's range.
+    """
+    parts = ["status:ACTIVE"]
+    if settings.SUPPORT_CATALOGUE_FILTER.strip():
+        parts.append(f"({settings.SUPPORT_CATALOGUE_FILTER.strip()})")
+    if extra:
+        parts.insert(0, extra if extra.startswith("(") else f"({extra})")
+    return " AND ".join(parts)
+
+
 def product_image(node: dict) -> str | None:
     """The product's featured image, if it has one."""
     media = node.get("featuredMedia") or {}
@@ -364,7 +378,7 @@ async def search_products(query: str = "", limit: int = PRODUCT_LIMIT) -> dict:
     """Search the live catalogue. Only ACTIVE products — a shopper cannot buy a draft."""
     term = " ".join(query.split()).strip()
     # The agent supplies only the term; the status filter is ours and always applied.
-    search = f"({term}) AND status:ACTIVE" if term else "status:ACTIVE"
+    search = sellable(f"({term})" if term else "")
     currency = (await shop_info())["currency"]
     data = await graphql(
         PRODUCT_SEARCH,
@@ -534,7 +548,7 @@ async def _grouped_categories() -> list[dict]:
         page = (
             await graphql(
                 CATEGORY_PRODUCTS,
-                {"query": "status:ACTIVE", "first": CATEGORY_SCAN_PAGE, "cursor": cursor},
+                {"query": sellable(), "first": CATEGORY_SCAN_PAGE, "cursor": cursor},
             )
         )["products"]
 
@@ -672,8 +686,8 @@ async def collections(limit: int = 8, handles: list[str] | None = None) -> dict:
 # left out of the tree.
 
 PRODUCT_COLLECTIONS = """
-query SupportProductCollections($cursor: String) {
-  products(first: 30, after: $cursor, query: "status:ACTIVE") {
+query SupportProductCollections($cursor: String, $query: String!) {
+  products(first: 30, after: $cursor, query: $query) {
     pageInfo { hasNextPage endCursor }
     nodes {
       legacyResourceId
@@ -719,7 +733,7 @@ async def collection_tree() -> dict:
 
     cursor: str | None = None
     for _ in range(TREE_SCAN_PAGES):
-        page = (await graphql(PRODUCT_COLLECTIONS, {"cursor": cursor}))["products"]
+        page = (await graphql(PRODUCT_COLLECTIONS, {"cursor": cursor, "query": sellable()}))["products"]
         for node in page["nodes"]:
             ptype = (node.get("productType") or "").strip()
             pid = str(node.get("legacyResourceId") or "")
@@ -1257,7 +1271,7 @@ async def _named_like(term: str, currency: str, limit: int) -> list[dict]:
     try:
         data = await graphql(
             PRODUCT_SEARCH,
-            {"query": f"({joined}) AND status:ACTIVE", "first": limit, "variants": VARIANT_LIMIT},
+            {"query": sellable(f"({joined})"), "first": limit, "variants": VARIANT_LIMIT},
         )
     except (ShopifyError, KeyError, ValueError):
         logger.warning("Name search failed for %r", term, exc_info=True)
@@ -1327,7 +1341,7 @@ async def category_products(category: str, limit: int = 12) -> dict:
     async def fetch(product_filter: str) -> list[dict]:
         data = await graphql(
             CATEGORY_PRODUCT_LIST,
-            {"query": f"{product_filter} AND status:ACTIVE", "first": limit, "variants": VARIANT_LIMIT},
+            {"query": sellable(product_filter), "first": limit, "variants": VARIANT_LIMIT},
         )
         return [_public_product(node, currency) for node in data["products"]["nodes"]]
 
