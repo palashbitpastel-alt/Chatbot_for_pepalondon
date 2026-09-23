@@ -982,7 +982,7 @@ _COLLECTION_GID_RE = re.compile(r"^gid://shopify/Collection/(\d+)$", re.I)
 COLLECTION_LOOKUP = """
 query SupportCollectionLookup($query: String!, $first: Int!) {
   collections(first: $first, query: $query) {
-    nodes { legacyResourceId handle title image { url altText } productsCount { count } }
+    nodes { legacyResourceId handle title description image { url altText } productsCount { count } }
   }
 }
 """
@@ -990,7 +990,7 @@ query SupportCollectionLookup($query: String!, $first: Int!) {
 COLLECTION_BY_ID = """
 query SupportCollectionById($id: ID!) {
   collection(id: $id) {
-    legacyResourceId handle title image { url altText } productsCount { count }
+    legacyResourceId handle title description image { url altText } productsCount { count }
   }
 }
 """
@@ -1142,6 +1142,9 @@ def _collection_as_category(node: dict) -> dict:
         "image_alt": image.get("altText") or node["title"],
         "url": collection_url(node["handle"]),
         "product_count": (node.get("productsCount") or {}).get("count") or 0,
+        # The merchant's own words for this edit, when they wrote any. The agent
+        # opens with them rather than a bare count.
+        "description": " ".join((node.get("description") or "").split())[:400] or None,
         "filter": f'collection_id:{node["legacyResourceId"]}',
     }
 
@@ -1456,7 +1459,7 @@ async def category_products(category: str, limit: int = 12) -> dict:
 
     return {
         "found": True,
-        "category": {k: found[k] for k in ("id", "name", "kind", "image", "url", "product_count")},
+        "category": {k: found.get(k) for k in ("id", "name", "kind", "image", "url", "product_count", "description")},
         "currency": currency,
         "count": len(products) + len(also_named),
         "more_available": len(products) == limit,

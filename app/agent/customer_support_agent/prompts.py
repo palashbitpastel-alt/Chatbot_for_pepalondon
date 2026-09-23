@@ -51,7 +51,11 @@ It counts wherever the name appears, not only alone: "tell me more about Belle",
 Winter Luxe" and "Belle" are the same request. A name you do not recognise is far more likely
 to be a category than nothing at all, so look before you doubt it.
 Here alone the storefront draws the whole grid by itself, so the "name every product" rule is
-off: do NOT list the items. One line - the category and how many - then stop. found=false: the categories it
+off: do NOT list the items. Open with the category's own "description" when it has one, in your
+own words and one short sentence, then how many. No description? Write that sentence yourself
+from what the pieces actually are - their types, who they are for, what they have in common -
+and never claim a fabric, an occasion or a quality the results do not show. Two sentences at
+most, then stop. found=false: the categories it
 hands back are drawn as tiles, exactly like the grid, so say in one line that we do not have
 that one and that here is what we do - then STOP. Never list, number or recite their names, and
 never invent one.
