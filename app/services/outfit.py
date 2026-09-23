@@ -592,6 +592,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "known": {"for": audience, "colour": colour or None, "occasion": occasion or None,
                   "age": age, "budget": budget or None, "category": wanted_category},
         "category_note": category_note,
+        "nothing_else_fits": _range_note(catalogue["products"], audience, age) if not picked else None,
         "occasion_matched": bool(occasion) and any(
             occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,
@@ -755,6 +756,23 @@ def _numbered_size_fits(piece: dict, age: int | None, oldest: int | None,
     low, high = span
     target = low + (min(age, oldest) / oldest) * (high - low)
     return min(numbers) - 1 <= target <= max(numbers) + 1
+
+
+def _range_note(stock: list[dict], audience: str | None, age: int | None) -> dict | None:
+    """Told nothing fits, say why: the range for this child stops earlier.
+
+    The boys' pieces run to 10Y, so a twelve year old boy has nothing here at
+    all. "The look came back with just the plimsolls" is true and useless; "our
+    boys' pieces go up to 10Y" is what a shopper needs to hear.
+    """
+    if age is None:
+        return None
+    theirs = [p for p in stock if not audience or not p["for"] or audience in p["for"]]
+    oldest = max((a for p in theirs for x in (p["sizes"] or []) if (a := _age_of(x)) is not None),
+                 default=None)
+    if oldest is None or oldest >= age:
+        return None
+    return {"asked_for_age": age, "oldest_we_make": oldest, "for": audience}
 
 
 def _size_for_age(sizes: list[str], age: int | None, oldest: int | None,
@@ -981,6 +999,8 @@ async def complete_the_look(product: str, size: str | None = None,
         return item
 
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
+    if not picked and (note := _range_note(stock, audience, age)):
+        look["nothing_else_fits"] = note
     look["found"] = bool(look.get("outfit"))
     look["anchor"] = {"handle": anchor["handle"], "title": anchor["title"], "category": anchor["category"]}
     look["size"] = size
