@@ -78,13 +78,29 @@ _COLOURS = [
 # colour-ish cue or on their own.
 _COLOUR_RE = re.compile(r"\b(" + "|".join(_COLOURS) + r")\b", re.I)
 
-FIELD_ORDER = ["for", "age", "occasion", "style", "colour", "budget", "size"]
+# "it's summer now" is a constraint, not small talk: it rules out the wool
+# coats. Weather words count as the season they belong to.
+_SEASONS = [
+    ("Summer", ("summer", "hot weather", "heatwave", "sunny", "the heat", "holiday season")),
+    ("Winter", ("winter", "cold weather", "freezing", "snow", "chilly")),
+    ("Spring", ("spring",)),
+    ("Autumn", ("autumn", "fall ", "back to school")),
+    ("Monsoon", ("monsoon", "rainy season", "rains")),
+]
+
+
+def _season(text: str) -> str | None:
+    lowered = text.lower()
+    return next((name for name, words in _SEASONS if any(w in lowered for w in words)), None)
+
+
+FIELD_ORDER = ["for", "age", "occasion", "season", "style", "colour", "budget", "size"]
 # What is worth remembering between visits: who they shop for and her size.
 # Occasion and budget belong to one shopping trip, not the next.
 REMEMBERED = ("for", "age", "size", "colour")
 LABELS = {
     "for": "For", "age": "Age", "occasion": "Occasion", "style": "Style",
-    "colour": "Colour", "budget": "Budget", "size": "Size",
+    "colour": "Colour", "budget": "Budget", "size": "Size", "season": "Season",
 }
 
 
@@ -198,6 +214,8 @@ def understood(messages: list[str], base: dict | None = None, currency: str | No
             said_age = True
         if occasion := _occasion(text):
             found["occasion"] = occasion
+        if season := _season(text):
+            found["season"] = season
         if style := _first_in(text, _STYLES):
             found["style"] = style
         if colour := _colour(text):

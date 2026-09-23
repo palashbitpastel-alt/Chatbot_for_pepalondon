@@ -202,3 +202,20 @@ def reset_size(token) -> None:
 
 def wants_size() -> str | None:
     return _size.get()
+
+
+# The season they are shopping for. "It's summer now" has to keep the wool
+# coats out of the answer, the same way a colour keeps the wrong ones out.
+_season: ContextVar[str | None] = ContextVar("wants_season", default=None)
+
+
+def set_season(season: str | None) -> object:
+    return _season.set((season or "").strip().title() or None)
+
+
+def reset_season(token) -> None:
+    _season.reset(token)
+
+
+def shopping_season() -> str | None:
+    return _season.get()

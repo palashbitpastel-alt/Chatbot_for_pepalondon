@@ -189,6 +189,39 @@ def _named_for(title: str, kind: str | None, audience: str) -> bool:
     return False
 
 
+# What a piece is made of and for, in the store's own words. A wool coat in a
+# summer outfit is the kind of answer that makes a shopper laugh at you.
+WARM_PIECES = ("coat", "jacket", "knit", "knitted", "wool", "cashmere", "fleece",
+               "padded", "puffer", "thermal", "velvet", "corduroy", "tartan",
+               "bonnet", "mitten", "scarf", "jumper", "cardigan", "sweater")
+COOL_PIECES = ("linen", "sleeveless", "short sleeve", "shorts", "sandal", "swim",
+               "sun", "romper", "cotton", "broderie", "organza", "voile")
+
+
+def _suits_season(piece: dict, season: str | None) -> bool:
+    """Whether a piece belongs in a look for this season.
+
+    Only the extremes are ruled out: nothing wool-lined in summer, nothing
+    sleeveless as the whole answer in winter. Everything else is left alone,
+    since most childrenswear is worn all year.
+    """
+    if not season:
+        return True
+    words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
+    if season == "Summer":
+        return not any(w in words for w in WARM_PIECES)
+    return True
+
+
+def _season_first(piece: dict, season: str | None) -> int:
+    """0 for a piece the season calls for, 1 for the rest - a sort key."""
+    if not season:
+        return 1
+    words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
+    wanted = WARM_PIECES if season in ("Winter", "Autumn") else COOL_PIECES
+    return 0 if any(w in words for w in wanted) else 1
+
+
 def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
     """Only pieces that suit this child - by tag, and by name.
 
@@ -525,6 +558,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
     pool = [p for p in catalogue["products"] if p["in_stock"]]
     pool = _for_this_child(pool, audience)
+    season = identity.shopping_season()
+    pool = [p for p in pool if _suits_season(p, season)]
     if occasion and not occasions.is_sleepwear(occasion):
         pool = [p for p in pool if p["category"] not in _NURSERY_BASICS]
         # Asked for a wedding, shown a nightdress: it is a dress by product type.
@@ -571,6 +606,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     # a piece tagged for this child over one that merely suits either.
     pool.sort(key=lambda p: (
         -occasions.score(p.get("occasions"), occasion),
+        _season_first(p, season),
         0 if audience and audience in p["for"] else 1,
         p["price_from"] or 0,
     ))
@@ -914,9 +950,11 @@ async def complete_the_look(product: str, size: str | None = None,
             and (p.get("role") or _category(p["title"], None)) != anchor_role]
     pool = _for_this_child(pool, audience)
     span = _shoe_span(stock)
+    season = identity.shopping_season()
     pool = [p for p in pool if _same_size(p, size) and _suits_age(p, age)
             and _numbered_size_fits(p, age, oldest, span)
-            and not occasions.is_sleepwear(p["title"])]
+            and not occasions.is_sleepwear(p["title"])
+            and _suits_season(p, season)]
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
 
@@ -926,6 +964,7 @@ async def complete_the_look(product: str, size: str | None = None,
         if not matches:
             continue
         matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
+                                    _season_first(p, season),
                                     0 if _shares_colour(p, anchor["colors"]) else 1,
                                     p["price_from"] or 0))
         picked.append(matches[0])

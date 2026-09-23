@@ -610,6 +610,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "colour"), None))
             identity.set_size(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
+            identity.set_season(next(
+                (f["value"] for f in understood["fields"] if f["key"] == "season"), None))
             if understood["fields"]:
                 yield _sse("understood", understood)
 
