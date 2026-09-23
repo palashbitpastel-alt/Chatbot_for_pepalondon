@@ -838,7 +838,6 @@ async def complete_the_look(product: str, size: str | None = None,
     # Whose size to build in: what was asked for, then what this conversation
     # has settled on, and only then the piece's own first size - which is its
     # smallest, and dressed a six year old as a baby.
-    size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
     # Nobody has said how old the child is, and this piece is sold across
     # several ages: guessing dressed a shopper's daughter as a toddler without
     # ever saying so. Ask, rather than pick for them.
@@ -854,6 +853,7 @@ async def complete_the_look(product: str, size: str | None = None,
                 "ask": "how old the child is",
             }
 
+    size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
     ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
     oldest = max(ages) if ages else None
     anchor_role = anchor.get("role") or _category(anchor["title"], None)
