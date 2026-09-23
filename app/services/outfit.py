@@ -711,10 +711,19 @@ def _numbers_in(sizes: list[str]) -> list[float]:
 
 
 def _shoe_span(products: list[dict]) -> tuple[float, float] | None:
-    """The run of numbered sizes the shop sells, smallest to largest."""
-    numbers = [n for p in products
-               for n in _numbers_in([x for x in (p.get("sizes") or [])
-                                     if not re.search(r"\d\s*[MY]\b", x.strip().upper())])]
+    """The run of shoe sizes the shop sells, smallest to largest.
+
+    Shoes only. A belt sold in "m-70-cm" and a hat in "56cm" are numbers too,
+    and letting them in stretched the run to 80 - which put a six year old in
+    the largest shoe in the shop.
+    """
+    numbers = [
+        n for p in products
+        if (p.get("role") or _category(p.get("title") or "", None)) == "Shoes"
+        for n in _numbers_in([x for x in (p.get("sizes") or [])
+                              if not re.search(r"\d\s*[MY]\b", x.strip().upper())
+                              and "cm" not in x.lower()])
+    ]
     return (min(numbers), max(numbers)) if numbers else None
 
 
@@ -838,19 +847,24 @@ async def complete_the_look(product: str, size: str | None = None,
         ladder = sorted(a for x in (anchor["sizes"] or []) if (a := _age_of(x)))
         if ladder:
             age = ladder[len(ladder) // 2]
+            # The size was only the piece's first, not the shopper's: keeping it
+            # held the anchor at 18M while everything round it came out 7Y.
+            size = next((x for x in anchor["sizes"] if _age_of(x) == age), None)
         else:
             numbers = sorted(_numbers_in(anchor["sizes"] or []))
             run = _shoe_span(stock)
             if numbers and run and run[1] > run[0] and oldest:
                 middle = numbers[len(numbers) // 2]
                 age = max(0, round(oldest * (middle - run[0]) / (run[1] - run[0])))
+                size = None      # a shoe number is not a size for the clothes
 
     pool = [p for p in stock if p["handle"] != anchor["handle"]
             and (p.get("role") or _category(p["title"], None)) != anchor_role]
     pool = _for_this_child(pool, audience)
     span = _shoe_span(stock)
     pool = [p for p in pool if _same_size(p, size) and _suits_age(p, age)
-            and _numbered_size_fits(p, age, oldest, span)]
+            and _numbered_size_fits(p, age, oldest, span)
+            and not occasions.is_sleepwear(p["title"])]
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
 
