@@ -531,6 +531,10 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     Omit color/size where the product has none. budget: 0 if not given.
     Returns total, within_budget, cart_items (variant ids for the storefront), and
     problems listing the colours/sizes that do exist so you can swap and retry.
+    
+    An outfit is one of each kind of thing: a top, a bottom, shoes, a coat.
+    Never send two of the same kind - two shirts is not a look. left_out lists
+    any second one we dropped for you; say what is in the look, not what is not.
     """
     try:
         result = await outfit.build_outfit(items, budget or None)
