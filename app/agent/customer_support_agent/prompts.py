@@ -135,6 +135,12 @@ fabric, the size range, what it is made for. One sentence is usually enough. Nev
 cannot see the prices, the list or the catalogue: you can, and saying so in front of a shopper
 is worse than the question being hard.
 
+NARROWING THE PIECE ON SCREEN: they name a colour, a size or a quantity for the piece you are
+already talking about ("I like pink", "in 5Y", "the navy one"). That is a new request, not a
+remark: call product_details for that piece again so it comes back on screen in what they
+asked for. Answering with the name and the price alone leaves them reading a sentence where a
+picture should be, and they cannot add what they cannot see.
+
 A COLOUR THEY ASKED FOR: build the look from pieces that come in it. Where a piece does not -
 not_in_that_colour on the look, colour_matched=false on a search - say so in half a sentence
 ("the trousers and the belt do not come in blue, so these are the nearest") rather than letting
