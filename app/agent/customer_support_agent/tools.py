@@ -386,15 +386,24 @@ async def get_store_info() -> str:
 
 @tool
 async def get_store_policies() -> str:
-    """Shipping, delivery, returns, refunds and contact details, from the store handbook.
+    """Shipping, delivery, returns, refunds and contact details.
 
-    Read the result carefully: anything still marked with an empty box has not been
-    decided yet, and must NOT be guessed at - offer a human instead.
+    "policies" are the store's own published policies, in the merchant's words -
+    quote what they say, briefly, and never contradict them. "handbook" is what
+    the team has written down internally; anything still marked with an empty box
+    has not been decided yet and must NOT be guessed at - offer a human instead.
+    Nothing here on the question they asked: say we have not published that and
+    point them at the team, rather than inventing a rule.
     """
     try:
         async with AsyncSessionLocal() as db:
             found = await handbook.search(db, "refund return shipping delivery policy terms", limit=4)
-        return json.dumps({"handbook": found}, ensure_ascii=False)
+        published = []
+        try:
+            published = await store_profile.policies()
+        except (ShopifyError, KeyError) as exc:
+            logger.info("Could not read the shop's published policies: %s", exc)
+        return json.dumps({"policies": published, "handbook": found}, ensure_ascii=False)
     except Exception as exc:  # noqa: BLE001 - a retrieval failure must not break the chat
         return _fail("get_store_policies", exc)
 
@@ -411,7 +420,15 @@ async def search_store_handbook(question: str) -> str:
     """
     try:
         async with AsyncSessionLocal() as db:
-            return json.dumps({"passages": await handbook.search(db, question, limit=4)}, ensure_ascii=False)
+            passages = await handbook.search(db, question, limit=4)
+        published = []
+        if any(word in question.lower() for word in
+               ("ship", "deliver", "return", "refund", "exchange", "policy", "terms", "privacy", "cancel")):
+            try:
+                published = await store_profile.policies()
+            except (ShopifyError, KeyError) as exc:
+                logger.info("Could not read the shop's published policies: %s", exc)
+        return json.dumps({"passages": passages, "policies": published}, ensure_ascii=False)
     except Exception as exc:  # noqa: BLE001
         return _fail("search_store_handbook", exc)
 

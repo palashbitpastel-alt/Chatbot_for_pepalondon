@@ -134,3 +134,58 @@ async def facts() -> str:
     text = "\n".join(lines)
     _FACTS_CACHE = (now, text)
     return text
+
+
+# ── The shop's own published policies ───────────────────────────────────────
+# "Do you ship to India?" and "what is your returns policy?" are two of the
+# three things shoppers ask, and the answer was "our handbook does not say" -
+# while the real policy sat published on the storefront the whole time. These
+# are the merchant's own words, read from Shopify, never summarised into rules.
+
+POLICIES = """
+query ShopPolicies {
+  shop {
+    shopPolicies { type title body url }
+  }
+}
+"""
+_POLICY_CACHE: tuple[float, list[dict]] | None = None
+POLICY_SECONDS = 900
+POLICY_CHARS = 900
+
+
+def _plain(html: str | None) -> str:
+    """Policy bodies come as HTML; the agent reads prose."""
+    import re
+
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "", flags=re.S | re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    for entity, char in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+                         ("&quot;", '"'), ("&#39;", "'")):
+        text = text.replace(entity, char)
+    return " ".join(text.split())
+
+
+async def policies() -> list[dict]:
+    """Every policy the merchant has published, as plain text. Empty if none are."""
+    global _POLICY_CACHE
+    import time
+
+    from app.services.shopify_client import graphql
+
+    now = time.monotonic()
+    if _POLICY_CACHE and now - _POLICY_CACHE[0] < POLICY_SECONDS:
+        return _POLICY_CACHE[1]
+    data = await graphql(POLICIES)
+    found = []
+    for policy in ((data.get("shop") or {}).get("shopPolicies") or []):
+        body = _plain(policy.get("body"))
+        if not body:
+            continue
+        found.append({
+            "policy": policy.get("title") or policy.get("type"),
+            "text": body[:POLICY_CHARS] + ("…" if len(body) > POLICY_CHARS else ""),
+            "url": policy.get("url"),
+        })
+    _POLICY_CACHE = (now, found)
+    return found
