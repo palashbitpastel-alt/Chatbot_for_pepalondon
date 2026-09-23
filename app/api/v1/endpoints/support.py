@@ -534,6 +534,13 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
     history = [] if not req.message.strip() else await _load_history(session_id, req.message)
     # The briefing rides along with this turn only; history keeps the raw message.
     briefing = describe(req.cart, req.customer, req.context)
+    # What shop this is, on every turn. Working blind is what made the answers
+    # read as guesses; it is cached, so it costs a few tokens and no lookups.
+    try:
+        about = await store_profile.facts()
+        briefing = f"{briefing}\n\n{about}" if briefing else about
+    except Exception:  # noqa: BLE001 - a fact sheet must never cost the answer
+        logger.warning("Could not read the store facts for this turn", exc_info=True)
     if _is_greeting(req.message):
         store = await _store_briefing(req.customer)
         briefing = f"{briefing}\n\n{store}" if briefing else store

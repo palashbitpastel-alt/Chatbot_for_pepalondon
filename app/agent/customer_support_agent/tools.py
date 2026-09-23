@@ -440,21 +440,28 @@ async def get_best_sellers(limit: int = 5) -> str:
 
 @tool
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
-                         age: int = 0, budget: float = 0) -> str:
+                         age: int = 0, budget: float = 0, category: str = "") -> str:
     """A few real pieces that fit what you know so far. Use on EVERY turn of an
     outfit, occasion or gift request - before you ask anything.
 
     Fill in only what the shopper has told you in this conversation and leave the
     rest empty (age 0, budget 0). for_who: "boy", "girl" or "baby". colour: as they
     said it, e.g. "navy". occasion: their words, e.g. "birthday party".
-    Returns up to 4 in-stock pieces, one per category, already filtered to suit
-    them - name each with its price. colour_matched=false means nothing came in
-    that colour: say so, and that these are the nearest. still_to_ask lists what
-    is missing - ask for the FIRST one only. Once age and budget are known, build
+    category: the kind of piece they named - "dress", "coat", "shoes". ALWAYS
+      pass it when they named one: "a dress for a wedding" must come back as
+      several dresses to choose between, not one dress and three other things.
+      Leave it empty for "an outfit", "something for her", a gift.
+    Returns in-stock pieces, best fit first, already suited to them - name each
+    with its price. worn_for says what the store's own words place a piece at.
+    occasion_matched=false means nothing in stock is written for that occasion:
+    say these are the nearest rather than calling them wedding pieces.
+    colour_matched=false means the same for colour. still_to_ask lists what is
+    missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.
     """
     try:
-        result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None)
+        result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
+                                             category=category, limit=6 if category else 4)
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("suggest_pieces", exc)

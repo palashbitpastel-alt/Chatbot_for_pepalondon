@@ -15,6 +15,7 @@ import json
 import logging
 from decimal import Decimal, InvalidOperation
 
+from app.services import occasions
 from app.services.shopify_client import ShopifyError, graphql
 from app.services.shopify_storefront import (
     product_image,
@@ -75,6 +76,25 @@ query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!) {
   }
 }
 """
+
+
+def _named_category(name: str, products: list[dict]) -> str | None:
+    """The kind of piece the shopper named, as this store labels it.
+
+    They say "dress" or "coats"; the store's own product types say "Dress" and
+    "Coat". Match against what the catalogue actually holds rather than a list
+    of our own, so a store that calls them "Outerwear" works too.
+    """
+    want = " ".join((name or "").strip().lower().split()).rstrip("s")
+    if not want:
+        return None
+    have = {p["category"] for p in products if p.get("category")}
+    for label in sorted(have, key=len):
+        lowered = label.lower().rstrip("s")
+        if lowered == want or want in lowered or lowered in want:
+            return label
+    guess = _category(want, None)
+    return guess if guess in have else None
 
 
 def _category(title: str, product_type: str | None) -> str:
@@ -159,6 +179,8 @@ async def browse_catalogue() -> dict:
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
                 "for": _suits(node.get("tags")),
+                "occasions": occasions.of(node.get("title"), " ".join(node.get("tags") or []),
+                                          node.get("description")),
                 "price_from": float(min(prices)) if prices else None,
                 "price_to": float(max(prices)) if prices else None,
                 "in_stock": any(v["availableForSale"] for v in variants),
@@ -396,12 +418,20 @@ def _colour_match(colours: list[str], wanted: str) -> str | None:
 
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
                          age: int | None = None, budget: float | None = None,
-                         limit: int = SUGGESTION_LIMIT) -> dict:
+                         category: str = "", limit: int = SUGGESTION_LIMIT) -> dict:
     """A few in-stock pieces that suit what the shopper has said so far.
 
     Every filter is optional, so the first message of a conversation already
-    gets something to look at. One piece per category, so the row reads as the
-    start of an outfit rather than four versions of the same shirt.
+    gets something to look at.
+
+    Without a category this returns one piece per kind, so the row reads as the
+    start of an outfit rather than four versions of the same shirt. With one -
+    "a dress for a wedding" - it returns that kind of piece and nothing else,
+    because a shopper asking for dresses wants to choose between dresses.
+
+    An occasion ranks rather than filters: the pieces whose own name, tags or
+    description place them at that occasion come first, a neighbouring occasion
+    next, and the rest after - so there is always something to show.
     """
     catalogue = await browse_catalogue()
     audience = _WHO.get((for_who or "").strip().lower())
@@ -417,6 +447,15 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     if budget:
         pool = [p for p in pool if p["price_from"] is not None and p["price_from"] <= budget]
 
+    # "A dress for a wedding": show dresses, not one dress and three other things.
+    wanted_category = _named_category(category, pool) if category else None
+    if wanted_category:
+        of_kind = [p for p in pool if p["category"] == wanted_category]
+        if of_kind:
+            pool = of_kind
+        else:
+            wanted_category = None
+
     colour_matched = None
     if wanted:
         coloured = [p for p in pool if _colour_match(p["colors"], wanted)]
@@ -426,14 +465,21 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         if coloured:
             pool = coloured
 
-    # A piece tagged for this child beats one that merely suits either.
-    pool.sort(key=lambda p: 0 if audience and audience in p["for"] else 1)
+    # Best fit first: the occasion the store's words actually place it at, then
+    # a piece tagged for this child over one that merely suits either.
+    pool.sort(key=lambda p: (
+        -occasions.score(p.get("occasions"), occasion),
+        0 if audience and audience in p["for"] else 1,
+        p["price_from"] or 0,
+    ))
 
     picked, seen = [], set()
     for product in pool:
-        if product["category"] in seen:
-            continue
-        seen.add(product["category"])
+        # One per kind only when the shopper did not name a kind.
+        if not wanted_category:
+            if product["category"] in seen:
+                continue
+            seen.add(product["category"])
         picked.append(product)
         if len(picked) >= max(1, limit):
             break
@@ -442,7 +488,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     return {
         "currency": catalogue["currency"],
         "known": {"for": audience, "colour": colour or None, "occasion": occasion or None,
-                  "age": age, "budget": budget or None},
+                  "age": age, "budget": budget or None, "category": wanted_category},
+        "occasion_matched": bool(occasion) and any(
+            occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,
         "still_to_ask": still_to_ask,
         "count": len(picked),
@@ -452,6 +500,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "product_id": p["product_id"],
                 "title": p["title"],
                 "category": p["category"],
+                "worn_for": ", ".join(p.get("occasions") or []) or None,
                 "price_from": p["price_from"],
                 "currency": catalogue["currency"],
                 "colour": _colour_match(p["colors"], wanted) if wanted else None,

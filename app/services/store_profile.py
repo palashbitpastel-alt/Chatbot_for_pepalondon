@@ -60,3 +60,77 @@ async def overview(limit: int = 6) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("Could not read the main categories", exc_info=True)
     return about
+
+
+# ── What the shop actually holds ────────────────────────────────────────────
+# The agent used to work blind: it could look a product up, but it had no sense
+# of the shop around it - what is sold, for which ages, at what prices, for what
+# occasions. So it guessed, and a guess in front of a shopper reads as stupid.
+# This is that sense, built from the catalogue itself and refreshed as it
+# changes, small enough to ride along with every single turn.
+
+_FACTS_CACHE: tuple[float, str] | None = None
+FACTS_SECONDS = 900
+
+
+def _size_span(products: list[dict]) -> str:
+    """"1M - 12Y", read off the sizes the store actually sells."""
+    from app.services import size_finder
+
+    seen = [s for p in products for s in (p.get("sizes") or [])]
+    ordered = [b.label for b in size_finder.CHART]
+    have = [label for label in ordered if any(label.lower() == s.strip().lower() for s in seen)]
+    return f"{have[0]} - {have[-1]}" if len(have) > 1 else (have[0] if have else "")
+
+
+async def facts() -> str:
+    """A short, true description of this shop, for the agent to answer from.
+
+    Everything here is read from the store: nothing is written into the code, so
+    a shop that starts selling coats says so the next time this refreshes.
+    """
+    global _FACTS_CACHE
+    import time
+
+    from app.services import occasions, outfit
+
+    now = time.monotonic()
+    if _FACTS_CACHE and now - _FACTS_CACHE[0] < FACTS_SECONDS:
+        return _FACTS_CACHE[1]
+
+    catalogue = await outfit.browse_catalogue()
+    products = [p for p in catalogue["products"] if p.get("in_stock")]
+    lines = ["[This shop - answer from these facts, and look up anything they do not cover]"]
+    try:
+        lines.append(f"Name: {await store_name()}")
+    except Exception:  # noqa: BLE001 - a fact sheet must not fail on one lookup
+        logger.debug("No store name for the fact sheet", exc_info=True)
+    if settings.SUPPORT_STORE_DESCRIPTION:
+        lines.append(f"Sells: {settings.SUPPORT_STORE_DESCRIPTION}")
+
+    counted: dict[str, int] = {}
+    for product in products:
+        if product.get("category"):
+            counted[product["category"]] = counted.get(product["category"], 0) + 1
+    if counted:
+        top = sorted(counted.items(), key=lambda kv: -kv[1])[:8]
+        lines.append("In stock now: " + ", ".join(f"{name} ({count})" for name, count in top))
+
+    prices = [p["price_from"] for p in products if p.get("price_from")]
+    if prices:
+        currency = catalogue.get("currency") or ""
+        lines.append(f"Prices run from {min(prices):g} to {max(prices):g} {currency}"
+                     " (the shopper is quoted their own market's price)")
+    span = _size_span(products)
+    if span:
+        lines.append(f"Sizes: {span}")
+
+    worn = {label for p in products for label in (p.get("occasions") or [])}
+    if worn:
+        lines.append("Occasions the range covers: "
+                     + ", ".join(label for label, _ in occasions.GROUPS if label in worn))
+        lines.append("Anything else - a ski suit, school uniform - we do not stock: say so plainly.")
+
+    text = "\n".join(lines)
+    _FACTS_CACHE = (now, text)
+    return text
