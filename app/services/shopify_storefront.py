@@ -1018,6 +1018,7 @@ query SupportCategoryProductList($query: String!, $first: Int!, $variants: Int!)
       title
       handle
       productType
+      tags
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -1048,6 +1049,7 @@ query SupportSizeScan($query: String!, $first: Int!, $cursor: String, $variants:
       title
       handle
       productType
+      tags
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
