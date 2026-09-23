@@ -165,6 +165,20 @@ async def _active_products(handles: list[str] | None = None) -> list[dict]:
 AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
 
 
+# Pieces the store's own words place on one child or the other, where it has
+# not tagged them. A big bow hairband arrived in a ten year old boy's outfit
+# because nothing said whose it was.
+HERS = ("hairband", "headband", "bow", "frill", "ruffle", "tutu", "ballet", "pinafore")
+HIS = ("tie", "braces", "bow tie", "waistcoat")
+
+
+def _named_for(title: str, audience: str) -> bool:
+    """Whether a piece's own name puts it on the other child."""
+    lowered = (title or "").lower()
+    other = HERS if audience == "Boys" else HIS if audience == "Girls" else ()
+    return any(word in lowered for word in other)
+
+
 def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
     """Only pieces that suit this child - by tag, and by name.
 
@@ -175,7 +189,12 @@ def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
         return pool
     kept = [p for p in pool if not p["for"] or audience in p["for"]]
     other = {"Girls": "boy", "Boys": "girl"}.get(audience)
-    return [p for p in kept if other not in (p.get("title") or "").lower()] if other else kept
+    if other:
+        kept = [p for p in kept if other not in (p.get("title") or "").lower()]
+    # Untagged, but the name says whose it is - only where the store itself has
+    # not tagged the piece for this child.
+    return [p for p in kept if audience in (p.get("for") or [])
+            or not _named_for(p.get("title") or "", audience)]
 
 
 def _suits(tags: list[str] | None) -> list[str]:
@@ -665,8 +684,22 @@ BABY_ONLY = ("bootie", "bootee", "pram", "newborn", "swaddle", "dummy", "pacifie
 OUT_OF_THE_PRAM = 3     # from this age on, a baby piece is the wrong piece
 
 
+def _size_number(label: str) -> float | None:
+    """The number a shoe size means, from a label that may carry three of them.
+
+    "13.5UK/1.5US/32EU" is one shoe written three ways. Taking the first number
+    put a two year old in a 32 - so the European figure wins where the label
+    says which is which, and otherwise the largest, since UK and US run smaller.
+    """
+    european = re.search(r"(\d+(?:\.\d+)?)\s*EU", label, re.I)
+    if european:
+        return float(european.group(1))
+    found = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", label)]
+    return max(found) if found else None
+
+
 def _numbers_in(sizes: list[str]) -> list[float]:
-    return [float(m.group()) for x in sizes if (m := re.search(r"\d+(?:\.\d+)?", x))]
+    return [n for x in sizes if (n := _size_number(x)) is not None]
 
 
 def _shoe_span(products: list[dict]) -> tuple[float, float] | None:
@@ -712,8 +745,7 @@ def _size_for_age(sizes: list[str], age: int | None, oldest: int | None,
     if told:
         fits = [x for x in told if _fits_age([x], age)] if age is not None else []
         return (fits or told)[0]
-    numbered = sorted((float(m.group()), x) for x in sizes
-                      if (m := re.search(r"\d+(?:\.\d+)?", x)))
+    numbered = sorted((n, x) for x in sizes if (n := _size_number(x)) is not None)
     if not numbered or age is None or not oldest:
         return sizes[0]
     if span:
@@ -826,6 +858,14 @@ async def complete_the_look(product: str, size: str | None = None,
             taken.add(role)
             if len(picked) >= max(1, pieces):
                 break
+
+    # A budget is what the shopper will spend on the look, not on each piece:
+    # four things under 400 each came to 730. Drop the dearest companions until
+    # the whole thing fits, keeping the piece they asked about.
+    if budget:
+        allowed = float(budget)
+        while picked and (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked) > allowed:
+            picked.pop(max(range(len(picked)), key=lambda i: picked[i]["price_from"] or 0))
 
     def line(piece: dict) -> dict:
         item = {"handle": piece["handle"], "quantity": 1}

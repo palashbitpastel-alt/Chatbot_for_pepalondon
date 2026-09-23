@@ -19,7 +19,12 @@ _NUM = r"(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")"
 
 # "my 5-year-old", "5 years old", "age 6", "she is six", "18 months"
 _AGE_YEARS = re.compile(rf"\b{_NUM}[\s-]*(?:years?|yrs?|yo|y/o)(?:[\s-]*old)?\b", re.I)
-_AGE_PLAIN = re.compile(rf"\b(?:aged?|she'?s|he'?s|she is|he is|turning)\s+{_NUM}\b", re.I)
+# "she is 6", "my daughter is 6", "the little one is 6", "turning 7"
+_AGE_PLAIN = re.compile(
+    rf"\b(?:aged?|turning|(?:she|he|they|daughter|son|girl|boy|baby|child|kid|one)"
+    rf"(?:'?s| is| are)?)\s+{_NUM}\b",
+    re.I,
+)
 _AGE_MONTHS = re.compile(r"\b(\d{1,2})[\s-]*(?:months?|mths?|mos?)(?:[\s-]*old)?\b", re.I)
 
 # "size 5Y", "5-6Y", "6-7 years" written as a size, "size 6"
@@ -59,10 +64,13 @@ _STYLES = [
     ("Premium", ("premium", "luxury", "special", "more expensive")),
 ]
 
+# Colours only. "Gingham", "tartan" and "floral" are patterns, and they arrive
+# inside product names - "the Catherine Gingham dress" was read as a colour and
+# quietly replaced the pink the shopper had actually asked for.
 _COLOURS = [
     "navy", "blue", "pink", "white", "ivory", "cream", "red", "burgundy", "green", "sage",
     "yellow", "lilac", "purple", "grey", "gray", "black", "beige", "gold", "silver",
-    "floral", "gingham", "tartan", "orange", "mint", "coral", "rose",
+    "orange", "mint", "coral", "rose", "camel", "denim", "khaki", "brown", "teal",
 ]
 
 # Words that stop a colour being read as one: "blue" in "baby blue" is still blue,
