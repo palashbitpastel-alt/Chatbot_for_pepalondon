@@ -192,8 +192,13 @@ async def _welcome_back(shopper: identity.Shopper) -> dict | None:
         # and what the shop sells most is the safest thing to show.
         try:
             found = await shopify_storefront.best_sellers(limit=3)
-            picks = cards_from("get_best_sellers", json.dumps(found, ensure_ascii=False))
             picks_because = "popular"
+            if not (found.get("products") or []):
+                # A shop with no orders yet has no best sellers; show what it
+                # has rather than an empty panel.
+                found = await shopify_storefront.search_products("", limit=3)
+                picks_because = "new_in"
+            picks = cards_from("get_best_sellers", json.dumps(found, ensure_ascii=False))
         except Exception:  # noqa: BLE001 - a greeting must not fail on this
             logger.warning("Could not load picks for a new customer", exc_info=True)
     # "Goes with it": what completes the last thing they bought.
