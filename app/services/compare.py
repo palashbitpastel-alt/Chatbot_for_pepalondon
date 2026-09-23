@@ -187,7 +187,7 @@ def _facts(node: dict, currency: str) -> dict:
             ("Sizes", size_range),
             ("Colours", ", ".join(colours)),
             ("Fabric", fabric),
-            ("Occasion", _occasions(node.get("tags"), f"{description} {' '.join(highlights)}")),
+            ("Occasion", _occasions(node.get("tags"), f"{node['title']} {description} {' '.join(highlights)}")),
             ("Made in", made_in),
         )
         if value
