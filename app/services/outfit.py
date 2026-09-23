@@ -650,11 +650,55 @@ def _suits_age(piece: dict, age: int | None) -> bool:
     """
     if age is None:
         return True
+    if age >= OUT_OF_THE_PRAM and any(w in (piece.get("title") or "").lower() for w in BABY_ONLY):
+        return False
     told = [s for s in (piece.get("sizes") or []) if re.search(r"\d\s*[MY]\b", s.strip().upper())]
     return _fits_age(told, age) if told else True
 
 
-def _size_for_age(sizes: list[str], age: int | None, oldest: int | None) -> str:
+# Pieces made for a baby, whatever their sizes say. Booties and pram shoes come
+# in "OS" or in a run of small numbers that names no age, so nothing else keeps
+# them out of a ten year old's outfit. These are words a store writes about its
+# own products, not a list of products.
+BABY_ONLY = ("bootie", "bootee", "pram", "newborn", "swaddle", "dummy", "pacifier",
+             "bib ", "bibs", "teether", "rattle", "sleepsuit")
+OUT_OF_THE_PRAM = 3     # from this age on, a baby piece is the wrong piece
+
+
+def _numbers_in(sizes: list[str]) -> list[float]:
+    return [float(m.group()) for x in sizes if (m := re.search(r"\d+(?:\.\d+)?", x))]
+
+
+def _shoe_span(products: list[dict]) -> tuple[float, float] | None:
+    """The run of numbered sizes the shop sells, smallest to largest."""
+    numbers = [n for p in products
+               for n in _numbers_in([x for x in (p.get("sizes") or [])
+                                     if not re.search(r"\d\s*[MY]\b", x.strip().upper())])]
+    return (min(numbers), max(numbers)) if numbers else None
+
+
+def _numbered_size_fits(piece: dict, age: int | None, oldest: int | None,
+                        span: tuple[float, float] | None) -> bool:
+    """Whether a piece sized by number - shoes - is made for a child this old.
+
+    A baby bootie in 20-26EU and a plimsoll in 21-36EU look alike to anything
+    that only reads sizes as text. Placing the child on the shop's own run of
+    numbers tells them apart: an eight year old lands around 31, which the
+    plimsoll covers and the bootie does not.
+    """
+    if age is None or not span or not oldest:
+        return True
+    sizes = [x for x in (piece.get("sizes") or []) if not re.search(r"\d\s*[MY]\b", x.strip().upper())]
+    numbers = _numbers_in(sizes)
+    if not numbers or len(sizes) != len(piece.get("sizes") or []):
+        return True                     # sized by age, or not sized at all
+    low, high = span
+    target = low + (min(age, oldest) / oldest) * (high - low)
+    return min(numbers) - 1 <= target <= max(numbers) + 1
+
+
+def _size_for_age(sizes: list[str], age: int | None, oldest: int | None,
+                  span: tuple[float, float] | None = None) -> str:
     """The size to put in the bag for a child this old.
 
     Sizes that name an age answer for themselves. Shoe sizes do not - they are
@@ -672,6 +716,10 @@ def _size_for_age(sizes: list[str], age: int | None, oldest: int | None) -> str:
                       if (m := re.search(r"\d+(?:\.\d+)?", x)))
     if not numbered or age is None or not oldest:
         return sizes[0]
+    if span:
+        low, high = span
+        target = low + (min(age, oldest) / oldest) * (high - low)
+        return min(numbered, key=lambda pair: abs(pair[0] - target))[1]
     at = round((min(age, oldest) / oldest) * (len(numbered) - 1))
     return numbered[max(0, min(at, len(numbered) - 1))][1]
 
@@ -737,7 +785,9 @@ async def complete_the_look(product: str, size: str | None = None,
     pool = [p for p in stock if p["handle"] != anchor["handle"]
             and (p.get("role") or _category(p["title"], None)) != anchor_role]
     pool = _for_this_child(pool, audience)
-    pool = [p for p in pool if _same_size(p, size) and _suits_age(p, age)]
+    span = _shoe_span(stock)
+    pool = [p for p in pool if _same_size(p, size) and _suits_age(p, age)
+            and _numbered_size_fits(p, age, oldest, span)]
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
 
@@ -779,7 +829,7 @@ async def complete_the_look(product: str, size: str | None = None,
             item["color"] = next((c for c in piece["colors"] if c.strip().lower() in shared), piece["colors"][0])
         if piece["sizes"]:
             fits = [s for s in piece["sizes"] if _same_size({"sizes": [s]}, size)]
-            item["size"] = _size_for_age(fits or piece["sizes"], age, oldest)
+            item["size"] = _size_for_age(fits or piece["sizes"], age, oldest, span)
         return item
 
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
