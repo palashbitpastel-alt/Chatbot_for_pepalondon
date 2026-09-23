@@ -157,10 +157,11 @@ def _budget(text: str, default_symbol: str = "") -> str | None:
     else:
         qualifier, symbol_, amount = (m.group(4) or "").lower(), default_symbol, m.group(5)
     qualifier = qualifier.replace("budget of", "").replace("budget is", "").replace("budget", "").strip()
-    # The figure is theirs; the money is the shop's. A shopper typing "£30000"
-    # on a store that sells in rupees means 30000 of what it is charging them,
-    # and that is what every price beside it will be in.
-    symbol_ = default_symbol or symbol_
+    # A figure typed with no sign at all is in the money the shop is charging
+    # them. A sign they DID type is theirs and stays: turning "£400" into "₹400"
+    # silently made a budget a hundredth of what they meant.
+    if not m.group(2) and not m.group(4):
+        symbol_ = default_symbol or symbol_
     amount = amount[:-3] if amount.endswith(".00") else amount
     if qualifier in ("under", "below", "less than", "up to", "max", "maximum"):
         return f"Under {symbol_}{amount}"

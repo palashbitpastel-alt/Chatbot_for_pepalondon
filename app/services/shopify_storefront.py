@@ -748,13 +748,18 @@ async def collection_tree() -> dict:
         for node in page["nodes"]:
             ptype = (node.get("productType") or "").strip()
             pid = str(node.get("legacyResourceId") or "")
-            if not ptype or not pid:
+            if not pid:
                 continue
-            type_of[pid] = ptype
-            type_of[node["title"].strip().lower()] = ptype
+            # Names first, and for every product. A piece with no product type
+            # used to be skipped outright, so the Linen Big Bow Hairband could
+            # be shown in a look and then "not found" when asked for by name.
             ids[node["title"].strip().lower()] = pid
             titles[pid] = node["title"].strip()
             handles[pid] = node["handle"]
+            if not ptype:
+                continue
+            type_of[pid] = ptype
+            type_of[node["title"].strip().lower()] = ptype
             type_products.setdefault(ptype, set()).add(pid)
             for coll in node["collections"]["nodes"]:
                 if coll["handle"] in published:
