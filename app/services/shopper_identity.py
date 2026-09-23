@@ -166,3 +166,21 @@ def reset_audience(token) -> None:
 
 def shopping_for() -> str | None:
     return _audience.get()
+
+
+# The colour they asked for, for the same reason as the audience above: told
+# "blue", a shopper should not be handed a shelf of camel and burgundy.
+_colour: ContextVar[str | None] = ContextVar("wants_colour", default=None)
+
+
+def set_colour(colour: str | None) -> object:
+    name = " ".join((colour or "").strip().lower().split())
+    return _colour.set(name or None)
+
+
+def reset_colour(token) -> None:
+    _colour.reset(token)
+
+
+def wants_colour() -> str | None:
+    return _colour.get()

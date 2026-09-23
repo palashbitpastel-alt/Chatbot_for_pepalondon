@@ -606,6 +606,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # theirs rather than half somebody else's.
             identity.set_audience(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "for"), None))
+            identity.set_colour(next(
+                (f["value"] for f in understood["fields"] if f["key"] == "colour"), None))
             if understood["fields"]:
                 yield _sse("understood", understood)
 

@@ -639,6 +639,38 @@ def _for_this_shopper(found: dict) -> dict:
     found["also_here_for_the_other"] = len(products) - len(kept)
     return found
 
+
+def _in_their_colour(found: dict) -> dict:
+    """Put the colour they asked for first, and say when we have none of it.
+
+    Told "blue", the shopper was still shown camel, burgundy and navy: the
+    colour lived in the Understood panel and nowhere a listing could read it.
+    A colour nothing comes in is not a reason to show nothing - it is a reason
+    to say so.
+    """
+    wanted = identity.wants_colour()
+    products = found.get("products") if isinstance(found, dict) else None
+    if not wanted or not isinstance(products, list) or not products:
+        return found
+
+    def comes_in(product: dict) -> bool:
+        if wanted in (product.get("title") or "").lower():
+            return True
+        return any(wanted in (v.get("option") or "").lower()
+                   for v in (product.get("variants") or []) if v.get("available"))
+
+    theirs = [p for p in products if comes_in(p)]
+    found = dict(found)
+    found["asked_for_colour"] = wanted
+    if not theirs:
+        found["colour_matched"] = False
+        return found
+    found["colour_matched"] = True
+    found["products"] = theirs
+    found["count"] = len(theirs)
+    found["also_here_in_other_colours"] = len(products) - len(theirs)
+    return found
+
 @tool
 async def browse_category(category: str) -> str:
     """Every product in ONE category the shopper named or tapped.
@@ -658,6 +690,10 @@ async def browse_category(category: str) -> str:
     have: offer those instead of apologising. more_available=true means there are
     more than the ones returned.
 
+    colour_matched=false means they asked for a colour and nothing here comes in
+    it: say that plainly before showing what there is. Where it is true, the
+    other colours were left out and also_here_in_other_colours counts them.
+
     filtered_to means the shopper has told you who they are shopping for and the
     pieces for the other child were left out; also_here_for_the_other says how
     many. Mention it in a half-sentence ("the boys' pieces are there too if you
@@ -670,7 +706,7 @@ async def browse_category(category: str) -> str:
     """
     try:
         found = await shopify_storefront.category_products(category)
-        return json.dumps(_for_this_shopper(found), ensure_ascii=False)
+        return json.dumps(_in_their_colour(_for_this_shopper(found)), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_category", exc)
 
