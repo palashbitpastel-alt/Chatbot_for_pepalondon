@@ -1156,6 +1156,8 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
 
     chosen: list[dict] = []
     problems: list[dict] = []
+    left_out: list[dict] = []
+    worn: dict[str, str] = {}
     total = Decimal("0")
 
     for item in requested:
@@ -1172,6 +1174,16 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         if product is None:
             problems.append({"handle": handle, "reason": "not_found_or_not_for_sale"})
             continue
+
+        # An outfit is one of each kind of thing. Asked for a birthday look, the
+        # agent once returned two shirts and a pair of plimsolls - and no
+        # trousers. The first of a kind stays; a second is left out, and said so.
+        role = _category(product["title"], None)
+        if role in worn:
+            left_out.append({"title": product["title"], "kind": role,
+                             "reason": "already_have_one", "instead_of": worn[role]})
+            continue
+        worn[role] = product["title"]
 
         variant = _match_variant(product, colour, size)
         if variant is None:
@@ -1226,6 +1238,7 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         "currency": currency,
         "total": float(total),
         "problems": problems,
+        "left_out": left_out,
     }
 
     # Asked for blue and handed a burgundy pair of trousers, a shopper deserves
