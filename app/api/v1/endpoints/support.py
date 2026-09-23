@@ -562,6 +562,10 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             briefing = f"{briefing}\nMulti-item offer on their bag: {line}"
 
     async def events() -> AsyncIterator[str]:
+        # Every price in this stream - the welcome tiles as much as the agent's
+        # cards - is the one the shopper's own storefront is quoting.
+        market.set_country(req.context.country if req.context else None)
+        market.set_showing(req.context.currency if req.context else None)
         yield _sse("session", {"session_id": session_id, "agent": CUSTOMER_SUPPORT_AGENT.name})
 
         # What they have asked for so far - age, occasion, budget, size - drawn by
@@ -615,13 +619,14 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 welcome["suggestions"] = []
             if shopper is not None:
                 try:
-                    back = await _welcome_back(shopper)
+                    back = await market.localize(await _welcome_back(shopper))
                     if back:
                         welcome["welcome_back"] = back
                         yield _sse("welcome_back", back)
                 except Exception:  # noqa: BLE001 - a greeting must not fail on order history
                     logger.warning("Could not build the welcome-back panel", exc_info=True)
             welcome["offer"] = {"tiers": await multi_buy.tiers()}
+            welcome = await market.localize(welcome)
             done_payload = {"session_id": session_id, "reply": greeting, **welcome}
             if cart_payload:
                 done_payload["cart"] = cart_payload
