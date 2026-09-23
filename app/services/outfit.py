@@ -527,6 +527,20 @@ async def complete_the_look(product: str, size: str | None = None,
         if len(picked) >= max(1, pieces):
             break
 
+    # The named companions for this kind of piece may not all be in stock in
+    # their size; rather than a look of one, fill up from whatever else suits.
+    if len(picked) < max(1, pieces):
+        taken = {p["category"] for p in picked}
+        rest = [p for p in pool if p["category"] not in taken]
+        rest.sort(key=lambda p: (0 if _shares_colour(p, anchor["colors"]) else 1, p["price_from"] or 0))
+        for piece in rest:
+            if piece["category"] in taken:
+                continue
+            picked.append(piece)
+            taken.add(piece["category"])
+            if len(picked) >= max(1, pieces):
+                break
+
     def line(piece: dict) -> dict:
         item = {"handle": piece["handle"], "quantity": 1}
         if piece["colors"]:
