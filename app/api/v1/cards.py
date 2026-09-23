@@ -9,6 +9,8 @@ takes it in one piece.
 import json
 import re
 
+from app.services import shopper_identity as identity
+
 # Tools whose result a client can render as cards, and the key it arrives under.
 CARD_TOOLS = {
     "search_products": "products",
@@ -145,8 +147,32 @@ def _without_choices(reply: str) -> str:
     return "\n".join(lines)
 
 
+def _in_their_colour(item: dict) -> dict:
+    """The variant to show first: the colour they asked for, if it comes in it.
+
+    A shopper who said "blue" was shown the pink pair of sunglasses, because a
+    card takes the product's first variant and the store lists pink first. The
+    picture, the price and the pre-picked colour all follow the variant, so
+    choosing the right one here fixes all three.
+    """
+    wanted = identity.wants_colour()
+    variants = item.get("variants")
+    if not wanted or not isinstance(variants, list):
+        return item
+    match = next((v for v in variants
+                  if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
+    if not match:
+        return item
+    return {**item,
+            "variant_id": match.get("variant_id") or item.get("variant_id"),
+            "option": match.get("option") or item.get("option"),
+            "image": match.get("image") or item.get("image"),
+            "url": match.get("url") or item.get("url")}
+
+
 def _card(item: dict) -> dict:
     """The fields a storefront needs to draw a product and link to it."""
+    item = _in_their_colour(item)
     return {
         "product_id": item.get("product_id"),
         "variant_id": item.get("variant_id"),
