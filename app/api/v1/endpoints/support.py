@@ -32,7 +32,7 @@ from app.api.v1.cards import CardCollector, cards_from, _card
 from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import size_finder, store_profile, suggestions
 from app.services.shopify_client import ShopifyError
-from app.db.models import ChatMessage
+from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -349,6 +349,43 @@ async def support_offer() -> dict:
     """The store's multi-item tiers, read from its own automatic discounts.
     Empty when none are set up - the widget then shows no offer."""
     return {"tiers": await multi_buy.tiers()}
+
+
+class StateRequest(BaseModel):
+    """The widget saving or loading a signed-in shopper's own chat state."""
+
+    customer: Customer | None = None
+    # Absent: a load. Present: a save, and the stored state is replaced with it.
+    state: dict | None = None
+
+
+STATE_LIMIT = 300_000          # characters of JSON - a few chats with their cards
+
+
+@router.post("/support/state")
+async def support_state(req: StateRequest) -> dict:
+    """A signed-in shopper's recents, saved pieces and remembered details.
+
+    Only for a shopper the theme has signed (SUPPORT_CUSTOMER_SIGNING_SECRET):
+    the key is their signed customer id, so nobody can read or overwrite anyone
+    else's. Guests keep everything in their own browser and never reach here.
+    """
+    shopper = identity.resolve(req.customer)
+    if shopper is None or not shopper.customer_id:
+        return {"synced": False, "reason": "not_signed_in"}
+    key = f"customer:{shopper.customer_id}"
+    async with AsyncSessionLocal() as db:
+        row = await db.get(ShopperState, key)
+        if req.state is None:
+            return {"synced": True, "state": (row.data if row else None)}
+        if len(json.dumps(req.state, ensure_ascii=False)) > STATE_LIMIT:
+            raise HTTPException(status_code=413, detail="That is more than we keep for one shopper.")
+        if row:
+            row.data = req.state
+        else:
+            db.add(ShopperState(customer_key=key, data=req.state))
+        await db.commit()
+    return {"synced": True}
 
 
 @router.get("/support/history")

@@ -29,6 +29,22 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class ShopperState(Base):
+    """A signed-in shopper's own chat state, so it follows them between devices.
+
+    Their recent chats (with pins), the pieces they saved, what we remember about
+    who they shop for, and the cards each chat drew. It is written by the widget
+    and read straight back - the server never reads inside it - and it is keyed
+    by the customer id the theme SIGNED, so one shopper can never read another's.
+    """
+
+    __tablename__ = "shopper_state"
+
+    customer_key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class OrderChangeRequest(Base):
     """A cancellation or address change a shopper has started but not confirmed.
 
