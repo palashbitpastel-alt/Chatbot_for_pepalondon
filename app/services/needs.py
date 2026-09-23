@@ -28,8 +28,10 @@ _SIZE = re.compile(r"\b(?:size\s+)?(\d{1,2}\s*-\s*\d{1,2}\s*y|\d{1,2}\s*y)\b|\bs
 # "under £200", "around £400", "£150 budget", "budget of 200", "up to 150"
 _BUDGET = re.compile(
     r"(?:(under|below|less than|up to|max(?:imum)?|around|about|roughly|approx(?:imately)?|budget(?: of| is)?)\s*)?"
-    r"([£$€])\s?(\d{2,5}(?:\.\d{2})?)"
-    r"|budget(?: of| is)?\s*([£$€])?\s?(\d{2,5})",
+    r"([£$€₹])\s?(\d{2,6}(?:\.\d{2})?)"
+    # ...or no sign at all: "around 30000", "budget of 500". Three figures at
+    # least, so an age or a size is never read as money.
+    r"|(?:(under|below|less than|up to|max(?:imum)?|around|about|roughly|approx(?:imately)?|budget(?: of| is)?)\s*)(\d{3,6})",
     re.I,
 )
 
@@ -129,7 +131,8 @@ def _budget(text: str, default_symbol: str = "") -> str | None:
     if m.group(3):
         qualifier, symbol_, amount = (m.group(1) or "").lower(), m.group(2), m.group(3)
     else:
-        qualifier, symbol_, amount = "", m.group(4) or default_symbol, m.group(5)
+        qualifier, symbol_, amount = (m.group(4) or "").lower(), default_symbol, m.group(5)
+    qualifier = qualifier.replace("budget of", "").replace("budget is", "").replace("budget", "").strip()
     # The figure is theirs; the money is the shop's. A shopper typing "£30000"
     # on a store that sells in rupees means 30000 of what it is charging them,
     # and that is what every price beside it will be in.
