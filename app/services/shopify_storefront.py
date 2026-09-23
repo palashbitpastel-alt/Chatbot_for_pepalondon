@@ -1028,6 +1028,90 @@ query SupportCategoryProductList($query: String!, $first: Int!, $variants: Int!)
 """
 
 
+SIZE_SCAN = """
+query SupportSizeScan($query: String!, $first: Int!, $cursor: String, $variants: Int!) {
+  products(first: $first, after: $cursor, query: $query, sortKey: TITLE) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      legacyResourceId
+      title
+      handle
+      productType
+      onlineStoreUrl
+      totalInventory
+      featuredMedia { ... on MediaImage { image { url altText } } }
+      options { name values }
+      variants(first: $variants) {
+        nodes {
+          legacyResourceId
+          sku
+          title
+          price
+          compareAtPrice
+          availableForSale
+          inventoryQuantity
+          selectedOptions { name value }
+          media(first: 1) { nodes { ... on MediaImage { image { url } } } }
+        }
+      }
+    }
+  }
+}
+"""
+SIZE_SCAN_PAGES = 5
+SIZE_SCAN_PAGE = 50
+
+
+def _size_of(variant: dict) -> str | None:
+    for option in variant.get("selectedOptions") or []:
+        if option["name"].strip().lower() in ("size", "age"):
+            return option["value"]
+    return None
+
+
+async def products_in_size(size: str, limit: int = 12) -> dict:
+    """Everything buyable in one size - "12Y", "18M", "5-6Y".
+
+    A size label covers a span ("11-12Y" includes 12Y), so sizes are compared as
+    spans rather than as text, and only variants actually in stock count.
+    """
+    from app.services.size_finder import span_of
+
+    wanted = span_of(size)
+    if wanted is None:
+        return {"found": False, "asked_for": size, "reason": "not_a_size"}
+    currency = (await shop_info())["currency"]
+    matches: list[dict] = []
+    cursor: str | None = None
+    for _ in range(SIZE_SCAN_PAGES):
+        page = (await graphql(SIZE_SCAN, {"query": sellable(), "first": SIZE_SCAN_PAGE,
+                                          "cursor": cursor, "variants": VARIANT_LIMIT}))["products"]
+        for node in page["nodes"]:
+            fits = [v for v in node["variants"]["nodes"]
+                    if v.get("availableForSale")
+                    and (span := span_of(_size_of(v) or "")) is not None
+                    and span[0] <= wanted[1] and wanted[0] <= span[1]]
+            if not fits:
+                continue
+            product = _public_product(node, currency)
+            product["variants"] = [_public_variant(v, node) for v in fits]
+            product["in_this_size"] = sorted({_size_of(v) for v in fits if _size_of(v)})
+            product["variant_id"] = fits[0].get("legacyResourceId")
+            product["price_from"] = round(min(float(v["price"]) for v in fits), 2)
+            matches.append(product)
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        cursor = page["pageInfo"]["endCursor"]
+    return {
+        "found": bool(matches),
+        "size": size,
+        "currency": currency,
+        "count": len(matches),
+        "more_available": len(matches) > limit,
+        "products": matches[:limit],
+    }
+
+
 def _quoted(value: str) -> str:
     """A value safe to sit inside double quotes in a Shopify search query."""
     return value.replace("\\", "\\\\").replace('"', '\\"')

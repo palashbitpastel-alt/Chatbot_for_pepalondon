@@ -540,6 +540,23 @@ async def list_categories() -> str:
 
 
 @tool
+async def browse_in_size(size: str) -> str:
+    """Every piece that comes in ONE size and is in stock in it.
+
+    size: as they said it - "12Y", "18M", "5-6Y". Use whenever a size is the
+    whole request ("what do you have in 12Y", "show me pieces in 2Y"), and never
+    search_products for it: a size is not a word in a product's name, so a search
+    finds only the few that spell it out. in_this_size on each piece is the exact
+    label it is sold under (a 12Y request matches an 11-12Y piece). found=false:
+    say plainly that nothing comes in that size and offer the nearest.
+    """
+    try:
+        return json.dumps(await shopify_storefront.products_in_size(size), ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("browse_in_size", exc)
+
+
+@tool
 async def browse_category(category: str) -> str:
     """Every product in ONE category the shopper named or tapped.
 
@@ -733,6 +750,7 @@ async def confirm_order_change(
 
 CUSTOMER_SUPPORT_TOOLS = [
     search_products,
+    browse_in_size,
     list_categories,
     browse_category,
     get_best_sellers,
@@ -769,7 +787,7 @@ CUSTOMER_SUPPORT_TOOLS = [
 # India, pounds in the UK), straight from Shopify's price lists. Orders are left
 # alone: they keep the currency they were paid in.
 MARKET_PRICED = {
-    "search_products", "browse_category", "get_best_sellers", "browse_catalogue",
+    "search_products", "browse_in_size", "browse_category", "get_best_sellers", "browse_catalogue",
     "suggest_pieces", "build_outfit", "compare_products", "recommend_for_me",
     "product_details", "add_to_cart", "find_size",
 }

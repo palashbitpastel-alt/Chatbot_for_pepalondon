@@ -13,6 +13,8 @@ import re
 CARD_TOOLS = {
     "search_products": "products",
     "browse_category": "products",
+    "browse_in_size": "products",
+
     "get_best_sellers": "products",
     "browse_catalogue": "products",
     "suggest_pieces": "products",
@@ -34,7 +36,7 @@ MAX_CARDS = 12
 # about. A category browse is the shopper's own request drawn back at them, so
 # it is sent whole - trimming it to the few products the reply names would empty
 # a grid the shopper explicitly asked to see.
-WHOLE_RESULT_TOOLS = {"browse_category"}
+WHOLE_RESULT_TOOLS = {"browse_category", "browse_in_size"}
 
 # Tools whose products are never trimmed to the wording. A comparison is every
 # product in it, whichever of them the reply happens to name in full.
