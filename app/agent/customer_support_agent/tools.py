@@ -593,6 +593,8 @@ async def browse_in_size(size: str) -> str:
     finds only the few that spell it out. in_this_size on each piece is the exact
     label it is sold under (a 12Y request matches an 11-12Y piece). found=false:
     say plainly that nothing comes in that size and offer the nearest.
+    Name the pieces with their prices - a count on its own ("8 pieces come in
+    12Y") leaves the shopper reading a number with unnamed cards beside it.
     """
     try:
         return json.dumps(await shopify_storefront.products_in_size(size), ensure_ascii=False)
