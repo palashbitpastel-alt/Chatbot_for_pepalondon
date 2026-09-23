@@ -47,6 +47,7 @@ query SupportProductSearch($query: String!, $first: Int!, $variants: Int!) {
       title
       handle
       productType
+      tags
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -117,6 +118,7 @@ query SupportCategoryProducts($query: String!, $first: Int!, $cursor: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       productType
+      tags
       category { id name }
       featuredMedia { ... on MediaImage { image { url } } }
     }
@@ -207,6 +209,7 @@ query SupportProductsByIds($ids: [ID!]!, $variants: Int!) {
       title
       handle
       productType
+      tags
       status
       onlineStoreUrl
       totalInventory
@@ -357,6 +360,9 @@ def _public_variant(v: dict, node: dict) -> dict:
     }
 
 
+AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
+
+
 def _public_product(node: dict, currency: str) -> dict:
     variants = node["variants"]["nodes"]
     prices = [float(v["price"]) for v in variants if v.get("price") is not None]
@@ -370,6 +376,11 @@ def _public_product(node: dict, currency: str) -> dict:
         "price_from": round(min(prices), 2) if prices else None,
         "price_to": round(max(prices), 2) if prices else None,
         "availability": _availability(variants),
+        # Who the store says a piece is for. Without it on every card, a shopper
+        # who told us "my daughter" was handed boys' trousers out of a mixed
+        # collection, because nothing downstream could tell them apart.
+        "for": [name for name in AUDIENCE_TAGS
+                if name.lower() in {t.strip().lower() for t in node.get("tags") or []}],
         "variants": [_public_variant(v, node) for v in variants],
     }
 
