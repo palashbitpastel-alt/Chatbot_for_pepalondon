@@ -125,6 +125,19 @@ async def _active_products(handles: list[str] | None = None) -> list[dict]:
 AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
 
 
+def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
+    """Only pieces that suit this child - by tag, and by name.
+
+    An untagged "Boy's Belt" is still a boy's belt, and it has no place in a
+    look built around a girl's dress.
+    """
+    if not audience:
+        return pool
+    kept = [p for p in pool if not p["for"] or audience in p["for"]]
+    other = {"Girls": "boy", "Boys": "girl"}.get(audience)
+    return [p for p in kept if other not in (p.get("title") or "").lower()] if other else kept
+
+
 def _suits(tags: list[str] | None) -> list[str]:
     """Who a piece is for, from the store's own tags. Empty means either."""
     lowered = {t.strip().lower() for t in tags or []}
@@ -383,8 +396,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     age = int(age) if age else None
 
     pool = [p for p in catalogue["products"] if p["in_stock"]]
-    if audience:
-        pool = [p for p in pool if not p["for"] or audience in p["for"]]
+    pool = _for_this_child(pool, audience)
     if occasion:
         pool = [p for p in pool if p["category"] not in _NURSERY_BASICS]
     if age is not None:
@@ -511,8 +523,7 @@ async def complete_the_look(product: str, size: str | None = None,
     order = COMPANIONS.get(anchor["category"], DEFAULT_COMPANIONS)
 
     pool = [p for p in stock if p["handle"] != anchor["handle"] and p["category"] != anchor["category"]]
-    if audience:
-        pool = [p for p in pool if not p["for"] or audience in p["for"]]
+    pool = _for_this_child(pool, audience)
     pool = [p for p in pool if _same_size(p, size)]
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
