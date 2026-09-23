@@ -411,6 +411,26 @@ def _fits_age(sizes: list[str], age: int | None) -> bool:
     return False
 
 
+def _their_colour_of(product: dict | None) -> str | None:
+    """The shopper's colour, as this product spells it - None if it has no such variant.
+
+    Asked for blue and handed a look, they should get the blue one of anything
+    that comes in blue, without having to say it again for every piece.
+    """
+    from app.services import shopper_identity as identity
+
+    wanted = identity.wants_colour()
+    if not product or not wanted:
+        return None
+    options = _options_of(product)
+    values = options.get("Color") or options.get("Colour") or []
+    words = {w for w in re.findall(r"[a-z]+", wanted) if len(w) > 2}
+    for value in values:
+        if words & {w for w in re.findall(r"[a-z]+", str(value).lower()) if len(w) > 2}:
+            return value
+    return None
+
+
 def _colour_match(colours: list[str], wanted: str) -> str | None:
     """The piece's own name for the colour asked for - "navy" finds "Navy"."""
     for colour in colours:
@@ -436,9 +456,13 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     description place them at that occasion come first, a neighbouring occasion
     next, and the rest after - so there is always something to show.
     """
+    from app.services import shopper_identity as identity
+
     catalogue = await browse_catalogue()
-    audience = _WHO.get((for_who or "").strip().lower())
-    wanted = (colour or "").strip().lower()
+    audience = _WHO.get((for_who or "").strip().lower()) or identity.shopping_for()
+    # The agent does not always pass on what the shopper said; the preference
+    # is held for the turn either way, so a suggestion never loses it.
+    wanted = (colour or identity.wants_colour() or "").strip().lower()
     age = int(age) if age else None
 
     pool = [p for p in catalogue["products"] if p["in_stock"]]
@@ -860,7 +884,8 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
 
     for item in requested:
         handle = str(item.get("handle", "")).strip()
-        colour = item.get("color") or item.get("colour") or None
+        colour = item.get("color") or item.get("colour") or _their_colour_of(products.get(
+            str(item.get("handle", "")).strip()))
         size = item.get("size") or None
         try:
             quantity = max(1, int(item.get("quantity") or 1))
