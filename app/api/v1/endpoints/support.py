@@ -371,12 +371,20 @@ async def support_topup(
         catalogue = await outfit.browse_catalogue()
         stock = [p for p in catalogue["products"] if p["in_stock"] and p["price_from"]]
         small = sorted(stock, key=lambda p: (0 if p["category"] in ("Accessory", "Socks") else 1, p["price_from"]))
-        picks = [
-            {"product_id": p.get("product_id"), "handle": p["handle"], "title": p["title"],
-             "price": p["price_from"], "currency": catalogue["currency"],
-             "image": p.get("image"), "url": p.get("url")}
-            for p in small[:limit]
-        ]
+        picks = []
+        for p in small[:limit]:
+            # The + button adds straight to the bag, so each pick carries the
+            # variant it would add - which is also what gets the market price.
+            node = await outfit.find_product(p["handle"])
+            variant = next((v for v in ((node or {}).get("variants") or {}).get("nodes") or []
+                            if v.get("availableForSale")), None)
+            picks.append({
+                "product_id": p.get("product_id"), "handle": p["handle"], "title": p["title"],
+                "variant_id": (variant or {}).get("legacyResourceId"),
+                "price": p["price_from"], "price_from": p["price_from"],
+                "currency": catalogue["currency"],
+                "image": p.get("image"), "url": p.get("url"),
+            })
         return await market.localize({"currency": catalogue["currency"], "products": picks})
     except ShopifyError as exc:
         logger.warning("Could not read the catalogue for a top-up: %s", exc)
