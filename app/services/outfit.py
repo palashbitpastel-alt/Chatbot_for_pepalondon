@@ -827,7 +827,9 @@ async def complete_the_look(product: str, size: str | None = None,
     order = COMPANIONS.get(anchor_role, DEFAULT_COMPANIONS)
     # A shoe size is a number and says nothing about age, so ask the
     # conversation before giving up on knowing how old the child is.
-    age = _age_of(size) or _age_of(identity.wants_size())
+    age = _age_of(size)
+    if age is None:
+        age = _age_of(identity.wants_size())   # nought is an age: a baby is 0
     if age is None:
         # Nobody has said how old the child is, and the piece runs from 18 months
         # to twelve years. Taking its first size dressed everyone as a baby and
@@ -907,20 +909,23 @@ async def complete_the_look(product: str, size: str | None = None,
                 item["size"] = _size_for_age(piece["sizes"], age, oldest, span)
             return item
 
-        # Their colour first, then one that sits with the anchor, then any.
-        theirs = [c for c in real if _comes_in({"colors": [c["color"] or ""]}, wanted_colour)]
-        if not theirs:
-            shared = {x.strip().lower() for x in anchor["colors"]} | NEUTRALS
-            theirs = [c for c in real if (c["color"] or "").strip().lower() in shared]
-        choices = theirs or real
-
-        sizes = [c["size"] for c in choices if c["size"]]
+        # The size comes first - it has to fit the child - and the colour then
+        # chooses among what is left. Doing it the other way round picked navy,
+        # which this shoe only comes in large, and put a 30 on a baby.
+        choices = real
+        sizes = [c["size"] for c in real if c["size"]]
         if sizes:
             numbered = not any(re.search(r"\d\s*[MY]\b", x.strip().upper()) for x in sizes)
             fits = sizes if numbered else [x for x in sizes if _same_size({"sizes": [x]}, size)]
             wanted_size = _size_for_age(fits or sizes, age, oldest, span)
-            choices = [c for c in choices if c["size"] == wanted_size] or choices
-        picked_one = choices[0]
+            choices = [c for c in real if c["size"] == wanted_size] or real
+
+        # Their colour, then one that sits with the anchor, then whatever is there.
+        theirs = [c for c in choices if _comes_in({"colors": [c["color"] or ""]}, wanted_colour)]
+        if not theirs:
+            shared = {x.strip().lower() for x in anchor["colors"]} | NEUTRALS
+            theirs = [c for c in choices if (c["color"] or "").strip().lower() in shared]
+        picked_one = (theirs or choices)[0]
         if picked_one["color"]:
             item["color"] = picked_one["color"]
         if picked_one["size"]:
