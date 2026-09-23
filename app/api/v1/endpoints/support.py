@@ -608,6 +608,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "for"), None))
             identity.set_colour(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "colour"), None))
+            identity.set_size(next(
+                (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
             if understood["fields"]:
                 yield _sse("understood", understood)
 

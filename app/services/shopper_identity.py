@@ -184,3 +184,21 @@ def reset_colour(token) -> None:
 
 def wants_colour() -> str | None:
     return _colour.get()
+
+
+# The size the conversation has settled on ("Size 8Y" in the Understood panel).
+# Without it a look falls back to the first size a piece is sold in, which is
+# the smallest - a six year old was dressed in 12M and handed a dummy.
+_size: ContextVar[str | None] = ContextVar("wants_size", default=None)
+
+
+def set_size(size: str | None) -> object:
+    return _size.set((size or "").strip() or None)
+
+
+def reset_size(token) -> None:
+    _size.reset(token)
+
+
+def wants_size() -> str | None:
+    return _size.get()

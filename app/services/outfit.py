@@ -775,12 +775,17 @@ async def complete_the_look(product: str, size: str | None = None,
     # allows it - the anchor's own colours decide only what goes with what.
     wanted_colour = identity.wants_colour()
     audience = next(iter(anchor["for"]), None)
-    size = size or next((s for s in anchor["sizes"] if s), None)
+    # Whose size to build in: what was asked for, then what this conversation
+    # has settled on, and only then the piece's own first size - which is its
+    # smallest, and dressed a six year old as a baby.
+    size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
     ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
     oldest = max(ages) if ages else None
     anchor_role = anchor.get("role") or _category(anchor["title"], None)
     order = COMPANIONS.get(anchor_role, DEFAULT_COMPANIONS)
-    age = _age_of(size)
+    # A shoe size is a number and says nothing about age, so ask the
+    # conversation before giving up on knowing how old the child is.
+    age = _age_of(size) or _age_of(identity.wants_size())
 
     pool = [p for p in stock if p["handle"] != anchor["handle"]
             and (p.get("role") or _category(p["title"], None)) != anchor_role]
