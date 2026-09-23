@@ -108,18 +108,36 @@ def _size(text: str) -> str | None:
     return f"{m.group(2)}Y"
 
 
-def _budget(text: str) -> str | None:
+# Enough to print a figure the way the storefront does. Anything not listed
+# is shown as its code ("AED 300"), which is still right, just less pretty.
+_SYMBOLS = {"GBP": "£", "USD": "$", "EUR": "€", "INR": "₹", "AUD": "A$", "CAD": "C$",
+            "NZD": "NZ$", "JPY": "¥", "CHF": "CHF ", "SEK": "kr ", "AED": "AED ", "SGD": "S$"}
+
+
+def symbol(currency: str | None) -> str:
+    """The sign the shopper's own storefront prints. "" when we do not know."""
+    code = (currency or "").strip().upper()
+    if not code:
+        return ""
+    return _SYMBOLS.get(code, f"{code} ")
+
+
+def _budget(text: str, default_symbol: str = "") -> str | None:
     m = _BUDGET.search(text)
     if not m:
         return None
     if m.group(3):
-        qualifier, symbol, amount = (m.group(1) or "").lower(), m.group(2), m.group(3)
+        qualifier, symbol_, amount = (m.group(1) or "").lower(), m.group(2), m.group(3)
     else:
-        qualifier, symbol, amount = "", m.group(4) or "£", m.group(5)
+        qualifier, symbol_, amount = "", m.group(4) or default_symbol, m.group(5)
+    # The figure is theirs; the money is the shop's. A shopper typing "£30000"
+    # on a store that sells in rupees means 30000 of what it is charging them,
+    # and that is what every price beside it will be in.
+    symbol_ = default_symbol or symbol_
     amount = amount[:-3] if amount.endswith(".00") else amount
     if qualifier in ("under", "below", "less than", "up to", "max", "maximum"):
-        return f"Under {symbol}{amount}"
-    return f"Around {symbol}{amount}"
+        return f"Under {symbol_}{amount}"
+    return f"Around {symbol_}{amount}"
 
 
 def _first_in(text: str, table) -> str | None:
@@ -147,7 +165,7 @@ def _colour(text: str) -> str | None:
     return "Grey" if colour == "gray" else colour.capitalize()
 
 
-def understood(messages: list[str], base: dict | None = None) -> dict:
+def understood(messages: list[str], base: dict | None = None, currency: str | None = None) -> dict:
     """Everything the shopper has told us, latest mention winning.
 
     ``messages`` are the shopper's own messages, oldest first. Returns
@@ -173,7 +191,7 @@ def understood(messages: list[str], base: dict | None = None) -> dict:
             found["style"] = style
         if colour := _colour(text):
             found["colour"] = colour
-        if budget := _budget(text):
+        if budget := _budget(text, symbol(currency)):
             found["budget"] = budget
         if size := _size(text):
             found["size"] = size

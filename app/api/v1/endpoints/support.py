@@ -551,7 +551,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # the widget as the "Understood" panel and the "Searching for" chips.
         if req.message.strip():
             said = [c for r, c in history if r == "user"] + [req.message]
-            understood = needs.understood(said, base=remembered)
+            understood = needs.understood(
+                said, base=remembered, currency=(req.context.currency if req.context else None))
             if understood["fields"]:
                 yield _sse("understood", understood)
 

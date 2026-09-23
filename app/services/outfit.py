@@ -210,6 +210,21 @@ query CartVariant($id: ID!) {
 MAX_CART_QUANTITY = 10
 
 
+async def _variant(variant_id: str) -> dict | None:
+    """One variant, read twice if the first read fails.
+
+    A bag is built from several of these in a row, and losing the whole
+    request to one blip - the shopper is told the store cannot be reached
+    while their pieces sit there - is worth a second attempt.
+    """
+    gid = f"gid://shopify/ProductVariant/{variant_id}"
+    try:
+        return (await graphql(VARIANT_BY_ID, {"id": gid}))["productVariant"]
+    except ShopifyError as exc:
+        logger.info("Re-reading variant %s after %s", variant_id, exc)
+        return (await graphql(VARIANT_BY_ID, {"id": gid}))["productVariant"]
+
+
 def _cart_line(product: dict, variant: dict, quantity: int) -> dict:
     unit = _money(variant["price"])
     variant_id = variant.get("legacyResourceId")
@@ -253,9 +268,7 @@ async def cart_additions(items: list[dict]) -> dict:
 
         variant_id = str(item.get("variant_id") or "").strip()
         if variant_id:
-            node = (
-                await graphql(VARIANT_BY_ID, {"id": f"gid://shopify/ProductVariant/{variant_id}"})
-            )["productVariant"]
+            node = await _variant(variant_id)
             product = (node or {}).get("product") or {}
             if not node or product.get("status") != "ACTIVE":
                 problems.append({"variant_id": variant_id, "reason": "not_found_or_not_for_sale"})
