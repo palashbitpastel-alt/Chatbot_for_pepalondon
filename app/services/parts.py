@@ -77,8 +77,13 @@ async def learn(types: list[str]) -> dict[str, str]:
         # at import time is how import cycles start.
         from app.agent.base import build_llm
 
+        # callbacks=[] on purpose: this runs inside a shopper's turn, and
+        # LangChain hands every model call the handlers of the run it sits in.
+        # Without it, the classifier's JSON was streamed to the shopper, ahead of
+        # their actual answer.
         answer = await build_llm(temperature=0, max_tokens=700).ainvoke(
-            _ASK.format(types="\n".join(f"- {t}" for t in unknown)))
+            _ASK.format(types="\n".join(f"- {t}" for t in unknown)),
+            config={"callbacks": [], "tags": ["parts"], "run_name": "learn_parts"})
         text = answer.content if hasattr(answer, "content") else str(answer)
         if block := re.search(r"\{.*\}", text, re.S):
             for product_type, part in json.loads(block.group(0)).items():
