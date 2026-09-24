@@ -66,7 +66,7 @@ async def product_details(name: str) -> dict:
         # machine washable?") is usually answered here rather than in the prose.
         "details": _details_from(node) or None,
         "in_collections": [c["title"] for c in ((node.get("collections") or {}).get("nodes") or [])
-                           if c.get("title")][:5],
+                           if c and c.get("title")][:5],
         "note": "Answer from description, highlights, care and details - details holds the fields the "
                 "merchant filled in, and is often where the answer is. If it is in none of them, say "
                 "the product page does not say, and offer our team.",

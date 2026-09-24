@@ -692,10 +692,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                         cards.take(event["name"], event.get("output"))
                 elif event["type"] == "final":
                     reply = event["reply"]
-        except Exception as exc:
+        except Exception:
             logger.exception("Support chat failed for session %s", session_id)
-            yield _sse("error", {"message": "Sorry — something went wrong. Please try again.",
-                                 "detail": f"{type(exc).__name__}: {exc}"[:300]})
+            yield _sse("error", {"message": "Sorry — something went wrong. Please try again."})
             return
         finally:
             identity.reset(token)

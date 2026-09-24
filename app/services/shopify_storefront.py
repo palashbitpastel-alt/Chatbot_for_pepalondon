@@ -416,8 +416,9 @@ MAX_METAFIELDS = 8
 
 def _readable_metafield(field: dict) -> str | None:
     """What this metafield actually says, or None when it says nothing useful."""
-    listed = [n.get("displayName") for n in
-              ((field.get("references") or {}).get("nodes") or []) if n.get("displayName")]
+    listed = [n["displayName"] for n in
+              ((field.get("references") or {}).get("nodes") or [])
+              if n and n.get("displayName")]
     if listed:
         return ", ".join(listed)
     single = (field.get("reference") or {}).get("displayName")
@@ -433,6 +434,8 @@ def _details_from(node: dict) -> dict:
     """The merchant's own extra fields, as words a shopper would recognise."""
     out: dict[str, str] = {}
     for field in ((node.get("metafields") or {}).get("nodes") or []):
+        if not field:
+            continue
         namespace = (field.get("namespace") or "").lower()
         if any(namespace.startswith(bad) for bad in NOISY_METAFIELDS):
             continue
@@ -461,8 +464,8 @@ def _what_it_is(node: dict) -> dict:
     options = _options_of_node(node)
     colours = options.get("color") or options.get("colour") or []
     sizes = options.get("size") or []
-    shelves = [c.get("title") for c in ((node.get("collections") or {}).get("nodes") or [])
-               if c.get("title")]
+    shelves = [c["title"] for c in ((node.get("collections") or {}).get("nodes") or [])
+               if c and c.get("title")]
     highlights = compare._highlights(node.get("descriptionHtml"))
     return {
         "about": compare._first_sentence(description, 180),
