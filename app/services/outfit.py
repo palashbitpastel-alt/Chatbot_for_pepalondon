@@ -553,6 +553,11 @@ _WHO = {
 SUGGESTION_LIMIT = 4
 
 
+# A size that names an age: "10Y", "18M", "12 mths". Lettered and centimetre
+# runs carry none, and must not be read as "does not fit".
+_AGE_IN_SIZE = re.compile(r"\d+\s*(?:Y|YR|YRS|YEAR|M|MTH|MTHS|MONTH)S?\b", re.I)
+
+
 def _fits_age(sizes: list[str], age: int | None) -> bool:
     """Whether a piece comes in a size for this age. Pieces with no size run fit."""
     if age is None or not sizes:
@@ -569,6 +574,13 @@ def _fits_age(sizes: list[str], age: int | None) -> bool:
             low, _, high = size[:-1].partition("-")
             if low.isdigit() and high.isdigit() and int(low) <= age <= int(high):
                 return True
+    # A size run that states no age at all cannot rule a piece out on age. Belts
+    # run "S / 60cm" and "m-70-cm", hats "S-L": none of that parses as an age, so
+    # every one of them was dropped the moment a shopper mentioned how old the
+    # child is - which is the question we ask first. The belt a shopper went
+    # looking for had been filtered out before the look was ever built.
+    if not any(_AGE_IN_SIZE.search(x) for x in sizes):
+        return True
     return False
 
 
