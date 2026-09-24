@@ -488,6 +488,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     there is no outfit to build for this child. Say that plainly, name where the
     range stops from nothing_wearable_fits, and do NOT ask for a budget or offer
     to build a look you cannot build.
+    season_matched=true means the store itself tags these pieces for the season
+    they asked about - say so ("these are our winter pieces"). Where it is false
+    they are the nearest, not the season's own.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.

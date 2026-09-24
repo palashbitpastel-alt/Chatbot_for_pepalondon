@@ -678,6 +678,11 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         else _range_note(catalogue["products"], audience, age),
         "occasion_matched": bool(occasion) and any(
             occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
+        # Whether the store itself says these are worn in this season, so the
+        # answer is "here are our winter pieces" and not "nothing here is made
+        # for winter" above the very booties the merchant tagged Winter.
+        "season_matched": bool(season) and any(
+            any(season.lower() in x.lower() for x in _stated_seasons(p)) for p in picked),
         "colour_matched": colour_matched,
         "still_to_ask": still_to_ask,
         "count": len(picked),
