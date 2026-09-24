@@ -76,6 +76,16 @@ async def add_to_cart(items: list[dict]) -> str:
       from its available options, then call again. Never choose a size for them.
     problems: out of stock, no such option, or not found - say which.
     """
+    if identity.only_narrowing():
+        # A size is not consent. The agent read "choose size 12y" as an
+        # instruction to buy and put a top in a shopper's bag unasked.
+        return json.dumps({
+            "done": False,
+            "refused": "they_only_chose_which_one",
+            "tell_the_shopper": ("Show the piece in what they picked and let them decide. "
+                                 "They said which one they meant - a size, a colour - not "
+                                 "that they wanted it bought."),
+        })
     try:
         return json.dumps(await outfit.cart_additions(items), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:

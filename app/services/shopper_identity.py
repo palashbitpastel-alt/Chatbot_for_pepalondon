@@ -115,6 +115,23 @@ def current_session() -> str | None:
 # The shopper's bag as the storefront sent it this turn, so the cart tools can
 # match "the plimsolls" to an exact line. It is only ever used to tell the
 # browser which of ITS OWN lines to change - the storefront does the change.
+# True when this turn's message only says WHICH piece they mean - a size, a
+# colour - and nothing about buying it. Set per request, read by add_to_cart.
+_narrowing: ContextVar[bool] = ContextVar("only_narrowing", default=False)
+
+
+def set_only_narrowing(value: bool) -> object:
+    return _narrowing.set(bool(value))
+
+
+def reset_only_narrowing(token) -> None:
+    _narrowing.reset(token)
+
+
+def only_narrowing() -> bool:
+    return _narrowing.get()
+
+
 _cart: ContextVar[object | None] = ContextVar("current_cart", default=None)
 
 

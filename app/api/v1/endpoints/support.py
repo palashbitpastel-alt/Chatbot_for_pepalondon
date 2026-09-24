@@ -723,6 +723,14 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
         saved_token = identity.set_saved(req.saved)
+        # "choose size 12y" says which one, not "buy it" - unless we were the
+        # ones who just asked about adding, in which case it is their answer.
+        we_offered = any(
+            "add" in content.lower()
+            for role, content in history[-1:] if role == "assistant"
+        )
+        narrowing_token = identity.set_only_narrowing(
+            cart_actions.is_only_narrowing(req.message) and not we_offered)
         country_token = market.set_country(req.context.country if req.context else None)
         showing_token = market.set_showing(req.context.currency if req.context else None)
         try:
@@ -747,6 +755,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset_session(session_token)
             identity.reset_cart(cart_token)
             identity.reset_saved(saved_token)
+            identity.reset_only_narrowing(narrowing_token)
             market.reset_country(country_token)
             market.reset_showing(showing_token)
 
