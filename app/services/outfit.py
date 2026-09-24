@@ -770,8 +770,12 @@ def _colour_gaps(before: list[dict], after: list[dict], wanted: str, limit: int 
         options = [p for p in before
                    if (p.get("role") or _category(p["title"], None)) == role]
         options.sort(key=lambda p: p["price_from"] or 0)
-        instead[role] = [{"title": p["title"], "handle": p["handle"],
-                          "colours": p["colors"], "price_from": p["price_from"]}
+        # product_id travels with the price: without it the market localizer
+        # cannot see these, and a shopper in India was quoted "203.09" next to
+        # "4600 INR" - the shop's base USD, relabelled.
+        instead[role] = [{"product_id": p["product_id"], "title": p["title"],
+                          "handle": p["handle"], "colours": p["colors"],
+                          "price_from": p["price_from"]}
                          for p in options[:limit]]
 
     # The colours a whole look could be built in, so the offer is not only
