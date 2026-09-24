@@ -54,6 +54,63 @@ _cache: dict[tuple[str, str], tuple[float, dict]] = {}
 VARIANT_PRICE_KEYS = ("price", "unit_price")
 
 
+# Which country to ask Shopify about, to see what it charges in a given money.
+CURRENCY_COUNTRY = {
+    "GBP": "GB", "USD": "US", "EUR": "DE", "JPY": "JP", "AUD": "AU", "CAD": "CA",
+    "AED": "AE", "SGD": "SG", "CHF": "CH", "SEK": "SE", "NZD": "NZ", "HKD": "HK",
+    "ZAR": "ZA", "INR": "IN",
+}
+SYMBOL_CURRENCY = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY", "₹": "INR",
+                   "GBP": "GBP", "USD": "USD", "EUR": "EUR", "INR": "INR", "AED": "AED"}
+
+
+def _round_money(amount: Decimal) -> float:
+    """A budget is a round number in the shopper's head; it should stay one."""
+    step = Decimal("100") if amount >= 1000 else Decimal("10") if amount >= 100 else Decimal("1")
+    return float((amount / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step)
+
+
+async def in_our_money(amount: float, their_money: str, product_id: str) -> dict | None:
+    """What a budget in someone else's money buys here, priced off our own shelves.
+
+    "Around £400" from a shopper being quoted rupees used to be answered with a
+    question, because there was no exchange rate to hand. There does not need to
+    be one: the shop already sells the same piece in both markets, and what it
+    charges for it in each IS the rate it trades at. No external feed, no
+    invented number - two price lists we were reading anyway.
+    """
+    here = current_country()
+    code = SYMBOL_CURRENCY.get((their_money or "").strip(), (their_money or "").strip().upper())
+    there = CURRENCY_COUNTRY.get(code)
+    if not here or not there or here == there or not amount:
+        return None
+    try:
+        ours = await _prices("Product", {str(product_id)}, here)
+        theirs = await _prices("Product", {str(product_id)}, there)
+    except (ShopifyError, KeyError) as exc:
+        logger.warning("No implied rate for %s -> %s: %s", code, here, exc)
+        return None
+    pid = str(product_id)
+    if pid not in ours or pid not in theirs:
+        return None
+
+    def low(table):
+        price = table[pid]["minVariantPricing"]["price"]
+        return Decimal(str(price["amount"])), price["currencyCode"]
+
+    ours_amount, ours_code = low(ours)
+    theirs_amount, theirs_code = low(theirs)
+    if theirs_amount <= 0 or theirs_code != code:
+        return None
+    return {
+        "their_budget": float(amount), "their_currency": theirs_code,
+        "our_budget": _round_money(Decimal(str(amount)) * ours_amount / theirs_amount),
+        "our_currency": ours_code,
+        "how": f"what this shop charges for the same piece in both markets "
+               f"({theirs_amount} {theirs_code} against {ours_amount} {ours_code})",
+    }
+
+
 def set_country(code: str | None):
     code = (code or "").strip().upper()
     return _country.set(code if len(code) == 2 and code.isalpha() else None)

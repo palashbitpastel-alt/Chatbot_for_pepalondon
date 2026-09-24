@@ -523,6 +523,39 @@ async def browse_catalogue() -> str:
 
 
 @tool
+async def budget_in_our_money(amount: float, currency: str) -> str:
+    """Turn a budget they gave in another money into the one you are quoting.
+
+    amount: the number they said (400). currency: what they said it in - a
+    symbol or a code, "£" or "GBP".
+
+    Use it the moment a budget arrives with a foreign sign on it, BEFORE asking
+    them anything. It is not an exchange rate: this shop sells the same piece in
+    both markets, and what it charges in each is what the two monies are worth
+    to it. Returns our_budget in our_currency - build to that figure, and say
+    both ("£400 is about 44000 INR here") so they can correct you if the market
+    pricing is not what they expected.
+
+    Nothing comes back when the shop does not sell in that money. Only then ask
+    them what they meant.
+    """
+    try:
+        catalogue = await outfit.browse_catalogue()
+        pick = next((p for p in catalogue.get("products") or []
+                     if p.get("product_id") and p.get("price_from")), None)
+        if not pick:
+            return json.dumps({"converted": False, "reason": "nothing_priced"})
+        found = await market.in_our_money(amount, currency, pick["product_id"])
+        if not found:
+            return json.dumps({"converted": False,
+                               "reason": "we_do_not_sell_in_that_money",
+                               "ask_them_what_they_meant": True})
+        return json.dumps({"converted": True, **found}, ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("budget_in_our_money", exc)
+
+
+@tool
 async def build_outfit(items: str | list, budget: float = 0) -> str:
     """Price a look exactly and get its variant ids. Never add prices up yourself.
 
@@ -883,6 +916,7 @@ async def confirm_order_change(
 
 
 CUSTOMER_SUPPORT_TOOLS = [
+    budget_in_our_money,
     search_products,
     browse_in_size,
     list_categories,
