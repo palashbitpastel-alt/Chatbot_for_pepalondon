@@ -51,6 +51,16 @@ query SupportProductSearch($query: String!, $first: Int!, $variants: Int!) {
       description(truncateAt: 400)
       options { name values }
       collections(first: 5) { nodes { handle title } }
+      metafields(first: 12) {
+        nodes {
+          namespace
+          key
+          type
+          value
+          reference { ... on Metaobject { displayName } }
+          references(first: 4) { nodes { ... on Metaobject { displayName } } }
+        }
+      }
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -393,6 +403,50 @@ def _public_product(node: dict, currency: str) -> dict:
     }
 
 
+# Metafields hold what a merchant could not fit anywhere else - fabric, fit,
+# care, age group. Two things make them unusable raw: the standard Shopify ones
+# store a reference, so "fabric" reads gid://shopify/Metaobject/251554857116
+# rather than "Cotton"; and review apps park entire HTML widgets in there, which
+# would swamp every answer with markup and no meaning.
+NOISY_METAFIELDS = ("judgeme", "reviews", "yotpo", "loox", "okendo", "seo", "globo",
+                    "hulkapps", "bss", "app--", "descriptors")
+METAFIELD_CHARS = 140
+MAX_METAFIELDS = 8
+
+
+def _readable_metafield(field: dict) -> str | None:
+    """What this metafield actually says, or None when it says nothing useful."""
+    listed = [n.get("displayName") for n in
+              ((field.get("references") or {}).get("nodes") or []) if n.get("displayName")]
+    if listed:
+        return ", ".join(listed)
+    single = (field.get("reference") or {}).get("displayName")
+    if single:
+        return single
+    value = (field.get("value") or "").strip()
+    if not value or value.startswith(("<", "[", "{")) or "class=" in value:
+        return None            # markup, or an unresolved reference id
+    return value[:METAFIELD_CHARS] + ("…" if len(value) > METAFIELD_CHARS else "")
+
+
+def _details_from(node: dict) -> dict:
+    """The merchant's own extra fields, as words a shopper would recognise."""
+    out: dict[str, str] = {}
+    for field in ((node.get("metafields") or {}).get("nodes") or []):
+        namespace = (field.get("namespace") or "").lower()
+        if any(namespace.startswith(bad) for bad in NOISY_METAFIELDS):
+            continue
+        said = _readable_metafield(field)
+        if not said:
+            continue
+        name = (field.get("key") or "").replace("-", " ").replace("_", " ").strip()
+        if name and name not in out:
+            out[name] = said
+        if len(out) >= MAX_METAFIELDS:
+            break
+    return out
+
+
 def _options_of_node(node: dict) -> dict[str, list[str]]:
     return {(o.get("name") or "").strip().lower(): o.get("values") or []
             for o in node.get("options") or []}
@@ -420,6 +474,8 @@ def _what_it_is(node: dict) -> dict:
         "in_collections": shelves[:5],
         "worn_for": ", ".join(occasions.of(node.get("title"), " ".join(node.get("tags") or []),
                                            description)) or None,
+        # Anything else the merchant has recorded against the product.
+        "details": _details_from(node) or None,
     }
 
 
@@ -1065,6 +1121,16 @@ query SupportCategoryProductList($query: String!, $first: Int!, $variants: Int!)
       description(truncateAt: 400)
       options { name values }
       collections(first: 5) { nodes { handle title } }
+      metafields(first: 12) {
+        nodes {
+          namespace
+          key
+          type
+          value
+          reference { ... on Metaobject { displayName } }
+          references(first: 4) { nodes { ... on Metaobject { displayName } } }
+        }
+      }
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -1099,6 +1165,16 @@ query SupportSizeScan($query: String!, $first: Int!, $cursor: String, $variants:
       description(truncateAt: 400)
       options { name values }
       collections(first: 5) { nodes { handle title } }
+      metafields(first: 12) {
+        nodes {
+          namespace
+          key
+          type
+          value
+          reference { ... on Metaobject { displayName } }
+          references(first: 4) { nodes { ... on Metaobject { displayName } } }
+        }
+      }
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }

@@ -41,10 +41,13 @@ async def search_products(query: str) -> str:
     query: a short term like "hairband" or a product name; empty lists what is sold.
     Returns up to 10 buyable products with price, currency and stock - and with
     about (a line of the store's own description), fabric, made_in, colours,
-    sizes, size_range, in_collections and worn_for. Answer "is it cotton", "does
-    it come in 12Y", "would it suit a wedding" straight from those rather than
-    looking the same piece up again. A field that is empty means the store has
-    not said it: say so plainly, never fill it in yourself.
+    sizes, size_range, in_collections and worn_for. details holds whatever else
+    the merchant has recorded against that product - fabric, age group, sleeve
+    length, care - as words, and is often where the real answer is. Use all of
+    it: "is it cotton", "does it come in 12Y", "can it be machine washed",
+    "would it suit a wedding" are answered from these rather than by looking the
+    same piece up again. A field that is empty means the store has not said it:
+    say so plainly, never fill it in yourself.
     """
     try:
         return json.dumps(await shopify_storefront.search_products(query), ensure_ascii=False)
