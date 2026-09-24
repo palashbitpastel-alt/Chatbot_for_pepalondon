@@ -16,7 +16,7 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation
 
-from app.services import occasions
+from app.services import occasions, parts
 from app.services.shopify_client import ShopifyError, graphql
 from app.services.shopify_storefront import (
     product_image,
@@ -63,6 +63,7 @@ query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!, $cursor: S
       tags
       onlineStoreUrl
       description(truncateAt: 240)
+      category { fullName }
       featuredMedia { ... on MediaImage { image { url altText } } }
       options { name values }
       variants(first: $variants) {
@@ -260,6 +261,7 @@ async def browse_catalogue() -> dict:
                 "product_id": node.get("legacyResourceId"),
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
+                "taxonomy": (node.get("category") or {}).get("fullName"),
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
@@ -482,6 +484,26 @@ _WHO = {
 
 SUGGESTION_LIMIT = 4
 
+# What a shopper means by "an outfit": something on top, something on the legs,
+# shoes, and a piece to finish it - or a dress, which does the first two at once.
+# These are parts, not garments: the one thing that does not vary between shops.
+OUTFIT_PARTS = ("Top", "Bottoms", "Shoes", "Accessory")
+DRESS_PARTS = ("Dress", "Shoes", "Accessory")
+
+
+def _role_of(product: dict) -> str:
+    """The part this piece plays, read from the shop rather than from a list.
+
+    The merchant's own taxonomy first, then what the model worked out about this
+    shop's product types, and only then the name. Nothing here is a table of
+    garments someone typed in.
+    """
+    if part := parts.from_taxonomy(product.get("taxonomy")):
+        return part
+    if part := parts.known(product.get("category")):
+        return part
+    return _category(product.get("title") or "", None)
+
 
 def _fits_age(sizes: list[str], age: int | None) -> bool:
     """Whether a piece comes in a size for this age. Pieces with no size run fit."""
@@ -611,16 +633,30 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         p["price_from"] or 0,
     ))
 
-    picked, seen = [], set()
-    for product in pool:
-        # One per kind only when the shopper did not name a kind.
-        if not wanted_category:
-            if product["category"] in seen:
-                continue
-            seen.add(product["category"])
-        picked.append(product)
-        if len(picked) >= max(1, limit):
-            break
+    if wanted_category:
+        # They named a kind, so show them that kind and nothing else.
+        picked = pool[:max(1, limit)]
+    else:
+        # What part each of THIS shop's product types plays, worked out once and
+        # remembered - not a table of garment names written in here.
+        await parts.learn([p.get("category") for p in pool])
+        # One piece per PART of an outfit, in the order an outfit is built, so a
+        # second shirt can never take the shoes' place. The pool is already in
+        # best-first order, so the first piece found for each part is the one to
+        # show. A dress stands in for a top and bottoms together, and is
+        # preferred when a dress outranks every top we have for this child.
+        best: dict[str, dict] = {}
+        for product in pool:
+            best.setdefault(_role_of(product), product)
+        wanted_parts = DRESS_PARTS if (
+            "Dress" in best and (
+                "Top" not in best or pool.index(best["Dress"]) < pool.index(best["Top"]))
+        ) else OUTFIT_PARTS
+        picked = [best[part] for part in wanted_parts if part in best][:max(1, limit)]
+        # Nothing of any part - a shop with only accessories for this child -
+        # rather than an empty answer, show what there is.
+        if not picked:
+            picked = pool[:max(1, limit)]
 
     still_to_ask = [name for name, have in (("age", age), ("budget", budget)) if not have]
     return {
@@ -1098,6 +1134,7 @@ async def recommend_from_orders(orders: list[dict], limit: int = 4) -> dict:
                 "product_id": node.get("legacyResourceId"),
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
+                "taxonomy": (node.get("category") or {}).get("fullName"),
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
