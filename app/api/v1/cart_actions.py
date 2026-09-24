@@ -101,36 +101,3 @@ def cart_action(message: str, issued: list[dict] | None = None) -> str | None:
         return ADD_PREVIOUS
     return None
 
-
-# A message that only picks which one they mean - "choose size 12y", "in 5Y",
-# "the navy one". The agent read one of these as consent and put a top in a
-# shopper's bag they had never asked for; they may not notice until they pay.
-# A bare number counts only where they said "size": "8" on its own is as likely
-# to be an age.
-_SIZE_TOKEN = (r"(?:\d{1,2}\s?(?:y|yr|yrs|years?|m|mth|mths|months?)|\d{2}\s?eu|"
-               r"x?[sml]|xl|xxl|(?<=size\s)\d{1,2})")
-_COLOUR_TOKEN = (r"(?:navy|blue|pink|white|cream|ivory|burgundy|red|green|camel|brown|black|"
-                 r"grey|gray|beige|teal|yellow|orange|gold|silver|sky\s?blue|khaki|denim)")
-_NARROWING_RE = re.compile(
-    rf"^(?:i\s+(?:want|like|will\s+take|choose)|let'?s\s+have|make\s+it|show\s+me|"
-    rf"give\s+me|go\s+with|choose|select|pick|take|in|size|colour|color|the)?\s*"
-    rf"(?:size\s+|colour\s+|color\s+|in\s+)?"
-    rf"(?:{_SIZE_TOKEN}|{_COLOUR_TOKEN})(?:\s+one|\s+please|\s+size|\s+pls|\s+then)?[.!]?$",
-    re.I,
-)
-
-
-def is_only_narrowing(text: str) -> bool:
-    """True when they are saying WHICH one, not asking for it to be bought."""
-    said = " ".join((text or "").split())
-    if not said or len(said.split()) > 6:
-        return False
-    if _ADD_RE.search(said) or _CHECKOUT_RE.search(said):
-        return False
-    return bool(_NARROWING_RE.match(said))
-
-
-def asked_to_add(text: str) -> bool:
-    """They asked, in so many words, for something to go in the bag."""
-    said = " ".join((text or "").split())
-    return bool(said and _ADD_RE.search(said) and not _NEGATED_RE.search(said))

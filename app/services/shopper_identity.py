@@ -115,21 +115,26 @@ def current_session() -> str | None:
 # The shopper's bag as the storefront sent it this turn, so the cart tools can
 # match "the plimsolls" to an exact line. It is only ever used to tell the
 # browser which of ITS OWN lines to change - the storefront does the change.
-# True when this turn's message only says WHICH piece they mean - a size, a
-# colour - and nothing about buying it. Set per request, read by add_to_cart.
-_narrowing: ContextVar[bool] = ContextVar("only_narrowing", default=False)
+# The shopper's own recent words. Nothing may be put in their bag unless the
+# agent can point at the words that asked for it, and those words were really
+# said - judging what they MEANT is the agent's job, not a pattern's.
+_said: ContextVar[tuple] = ContextVar("what_they_said", default=())
 
 
-def set_only_narrowing(value: bool) -> object:
-    return _narrowing.set(bool(value))
+def set_said(messages) -> object:
+    return _said.set(tuple(m for m in (messages or []) if m))
 
 
-def reset_only_narrowing(token) -> None:
-    _narrowing.reset(token)
+def reset_said(token) -> None:
+    _said.reset(token)
 
 
-def only_narrowing() -> bool:
-    return _narrowing.get()
+def they_said(words: str) -> bool:
+    """Whether these words really appear in what the shopper just said."""
+    want = " ".join((words or "").lower().split())
+    if not want:
+        return False
+    return any(want in " ".join(said.lower().split()) for said in _said.get())
 
 
 _cart: ContextVar[object | None] = ContextVar("current_cart", default=None)

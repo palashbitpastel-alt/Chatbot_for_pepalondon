@@ -75,16 +75,28 @@ async def add_to_cart(items: list[dict]) -> str:
     needs_choice: nothing was added; ask for exactly what it lists as missing,
       from its available options, then call again. Never choose a size for them.
     problems: out of stock, no such option, or not found - say which.
+
+    they_asked: the shopper's OWN words asking for this, quoted exactly from
+    what they wrote - "add it to my bag", "yes please", "I will take it". You
+    judge what they meant; this only stops anything going in a bag on your say
+    so alone. Adding is refused without it, and inventing words they did not
+    write is the one thing that cannot be allowed here.
+
+    Naming a size or a colour is not asking to buy - "choose size 12y" means
+    show me that one. But where you asked which size BECAUSE they asked you to
+    add it, their "12Y" finishes that request: quote their earlier words and add.
     """
-    if identity.only_narrowing():
-        # A size is not consent. The agent read "choose size 12y" as an
-        # instruction to buy and put a top in a shopper's bag unasked.
+    if not identity.they_said(they_asked):
+        # Told "choose size 12y", the agent put a top in a shopper's bag. It may
+        # read intent however it likes - it just has to be able to point at the
+        # words, and they have to be words the shopper really wrote.
         return json.dumps({
             "done": False,
-            "refused": "they_only_chose_which_one",
-            "tell_the_shopper": ("Show the piece in what they picked and let them decide. "
-                                 "They said which one they meant - a size, a colour - not "
-                                 "that they wanted it bought."),
+            "refused": "nobody_asked_for_this",
+            "why": ("they_asked must quote the shopper's own words asking for this, "
+                    f"and {they_asked!r} is not among the things they said."),
+            "tell_the_shopper": ("Show the piece and let them decide. If they meant to buy "
+                                 "it, they will say so - then you can quote them."),
         })
     try:
         return json.dumps(await outfit.cart_additions(items), ensure_ascii=False)
