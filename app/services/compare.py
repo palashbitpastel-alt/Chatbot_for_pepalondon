@@ -33,6 +33,17 @@ query SupportCompareProducts($ids: [ID!]!) {
       onlineStoreUrl
       description
       descriptionHtml
+      collections(first: 5) { nodes { title } }
+      metafields(first: 12) {
+        nodes {
+          namespace
+          key
+          type
+          value
+          reference { ... on Metaobject { displayName } }
+          references(first: 4) { nodes { ... on Metaobject { displayName } } }
+        }
+      }
       featuredMedia { ... on MediaImage { image { url altText } } }
       options { name values }
       priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
