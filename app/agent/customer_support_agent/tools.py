@@ -494,9 +494,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     colour_gaps is what the colour cost. missing lists the parts of an outfit
     that exist for this child but NOT in the colour they asked for - say so in
     as many words ("we have no blue trousers in 10Y"), never leave the gap
-    unmentioned. Then offer BOTH ways round it: the pieces in
-    instead_in_other_colours (name them with their colours), or a whole look in
-    one of whole_look_colours, where every part exists. Ask which they would
+    unmentioned. Then offer BOTH ways round it, with the actual names - never
+    "trousers in the colours we do stock" when the result hands you
+    instead_in_other_colours: say "the Navy Pocket Detail Chinos or the Burgundy
+    Corduroys, both 9800 INR". Never "a colour that has everything" when
+    whole_look_colours names it: say "or the whole outfit in burgundy". A shopper
+    cannot choose between two things you have not named. Ask which they would
     rather have before pricing anything up.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
