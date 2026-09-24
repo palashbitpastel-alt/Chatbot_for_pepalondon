@@ -63,7 +63,7 @@ async def check_order_status(order_number: str, email: str) -> str:
 
 
 @tool
-async def add_to_cart(items: list[dict]) -> str:
+async def add_to_cart(items: list[dict], they_asked: str) -> str:
     """Put products in the shopper's bag. The storefront does the adding; this
     finds the exact variant and tells it which.
 
@@ -97,6 +97,8 @@ async def add_to_cart(items: list[dict]) -> str:
                     f"and {they_asked!r} is not among the things they said."),
             "tell_the_shopper": ("Show the piece and let them decide. If they meant to buy "
                                  "it, they will say so - then you can quote them."),
+            "do_not_retry": ("Calling this again will be refused the same way. Answer them "
+                             "now, without adding."),
         })
     try:
         return json.dumps(await outfit.cart_additions(items), ensure_ascii=False)
