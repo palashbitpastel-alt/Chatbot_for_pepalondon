@@ -494,7 +494,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     colour_gaps is what the colour cost. missing lists the parts of an outfit
     that exist for this child but NOT in the colour they asked for - say so in
     as many words ("we have no blue trousers in 10Y"), never leave the gap
-    unmentioned. Then offer BOTH ways round it, with the actual names - never
+    unmentioned. missing is the WHOLE list of gaps and the only one: naming a
+    part that is not in it contradicts the pieces you are about to offer, which
+    is how "no blue shoes" ended up two lines above the blue plimsolls. Then offer BOTH ways round it, with the actual names - never
     "trousers in the colours we do stock" when the result hands you
     instead_in_other_colours: say "the Navy Pocket Detail Chinos or the Burgundy
     Corduroys, both 9800 INR". Never "a colour that has everything" when
