@@ -663,6 +663,18 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                         yield _sse("welcome_back", back)
                 except Exception:  # noqa: BLE001 - a greeting must not fail on order history
                     logger.warning("Could not build the welcome-back panel", exc_info=True)
+            try:
+                # A budget worth suggesting, in this visitor's own money: three
+                # pieces at what our pieces actually cost, not a number typed
+                # into the theme in pounds.
+                catalogue = await outfit.browse_catalogue()
+                ids = [p["product_id"] for p in (catalogue.get("products") or [])
+                       if p.get("product_id") and p.get("price_from")][:15]
+                if hint := await market.typical_spend(ids):
+                    welcome["budget_hint"] = hint
+                    yield _sse("budget_hint", hint)
+            except Exception:  # noqa: BLE001 - a suggested figure is a nicety
+                logger.warning("Could not work out a budget hint", exc_info=True)
             welcome["offer"] = {"tiers": await multi_buy.tiers()}
             welcome = await market.localize(welcome)
             done_payload = {"session_id": session_id, "reply": greeting, **welcome}

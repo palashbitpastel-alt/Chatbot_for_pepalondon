@@ -128,6 +128,36 @@ async def in_our_money(amount: float, their_money: str, product_ids) -> dict | N
     }
 
 
+async def typical_spend(product_ids, pieces: int = 3) -> dict | None:
+    """A believable budget in the shopper's own money, read off our own shelves.
+
+    The welcome screen suggested "around £400" to everyone, pounds included, to
+    a shopper being quoted rupees. What a look costs is not a constant and not
+    ours to invent: it is roughly what a few of our pieces cost, in whatever
+    money this visitor is being charged.
+    """
+    here = current_country()
+    ids = {str(i) for i in (product_ids or []) if i}
+    if not here or not ids:
+        return None
+    try:
+        priced = await _prices("Product", ids, here)
+    except (ShopifyError, KeyError) as exc:
+        logger.warning("No typical spend for %s: %s", here, exc)
+        return None
+    amounts, code = [], None
+    for value in priced.values():
+        price = (value or {}).get("minVariantPricing", {}).get("price")
+        if price:
+            amounts.append(Decimal(str(price["amount"])))
+            code = price["currencyCode"]
+    if not amounts or not code:
+        return None
+    amounts.sort()
+    middle = amounts[len(amounts) // 2]
+    return {"amount": _round_money(middle * pieces), "currency": code}
+
+
 def set_country(code: str | None):
     code = (code or "").strip().upper()
     return _country.set(code if len(code) == 2 and code.isalpha() else None)
