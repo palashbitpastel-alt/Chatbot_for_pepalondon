@@ -635,12 +635,14 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
             wanted_category = None
 
     colour_matched = None
+    colour_gaps = None
     if wanted:
         coloured = [p for p in pool if _colour_match(p["colors"], wanted)]
         colour_matched = bool(coloured)
         # Asked for navy, shown navy - padding the row with other colours would
         # have the agent calling a powder-blue shirt navy.
         if coloured:
+            colour_gaps = _colour_gaps(pool, coloured, wanted)
             pool = coloured
 
     # Best fit first: the occasion the store's words actually place it at, then
@@ -684,6 +686,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "season_matched": bool(season) and any(
             any(season.lower() in x.lower() for x in _stated_seasons(p)) for p in picked),
         "colour_matched": colour_matched,
+        # What the colour left out, and the two ways to close it.
+        "colour_gaps": colour_gaps,
         "still_to_ask": still_to_ask,
         "count": len(picked),
         "products": [
@@ -735,6 +739,55 @@ def _has_clothing(pieces: list[dict]) -> bool:
 # Colours that sit with anything, so a look is never blocked on an exact match.
 NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
 LOOK_PIECES = 3
+
+
+
+# A colour is a filter, and a filter silently removes things. Asked for a blue
+# birthday outfit for a 10 year old boy, the answer was a shirt, a jacket and a
+# pair of plimsolls: every blue piece we had, and no trousers at all, because
+# the boys' bottoms come in Burgundy, Camel, Navy and Brown. The shopper is not
+# told that, so the look just looks incomplete. Naming the gap - and what would
+# close it - is the difference between a filter and a shop assistant.
+LOOK_ROLES = ("Top", "Bottoms", "Shoes")
+
+
+def _roles_of(pieces: list[dict]) -> set[str]:
+    return {(p.get("role") or _category(p.get("title") or "", None)) for p in pieces}
+
+
+def _colour_gaps(before: list[dict], after: list[dict], wanted: str, limit: int = 3) -> dict | None:
+    """What asking for this colour left out, and how to have it anyway."""
+    had, left = _roles_of(before), _roles_of(after)
+    missing = [r for r in LOOK_ROLES if r in had and r not in left]
+    if "Dress" in left:
+        # A dress is a whole outfit; missing tops and bottoms are no gap.
+        missing = [r for r in missing if r not in ("Top", "Bottoms")]
+    if not missing:
+        return None
+
+    instead: dict[str, list[dict]] = {}
+    for role in missing:
+        options = [p for p in before
+                   if (p.get("role") or _category(p["title"], None)) == role]
+        options.sort(key=lambda p: p["price_from"] or 0)
+        instead[role] = [{"title": p["title"], "handle": p["handle"],
+                          "colours": p["colors"], "price_from": p["price_from"]}
+                         for p in options[:limit]]
+
+    # The colours a whole look could be built in, so the offer is not only
+    # "settle for another colour" but "or have all of it in burgundy".
+    by_colour: dict[str, set[str]] = {}
+    for piece in before:
+        role = piece.get("role") or _category(piece["title"], None)
+        for colour_name in piece["colors"]:
+            if name := (colour_name or "").strip():
+                by_colour.setdefault(name, set()).add(role)
+    whole = sorted(name for name, roles in by_colour.items()
+                   if "Dress" in roles or {"Top", "Bottoms"} <= roles)
+
+    return {"wanted": wanted, "missing": missing,
+            "instead_in_other_colours": instead,
+            "whole_look_colours": whole}
 
 
 def _colour_words(piece: dict) -> set[str]:

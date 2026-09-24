@@ -491,6 +491,13 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     season_matched=true means the store itself tags these pieces for the season
     they asked about - say so ("these are our winter pieces"). Where it is false
     they are the nearest, not the season's own.
+    colour_gaps is what the colour cost. missing lists the parts of an outfit
+    that exist for this child but NOT in the colour they asked for - say so in
+    as many words ("we have no blue trousers in 10Y"), never leave the gap
+    unmentioned. Then offer BOTH ways round it: the pieces in
+    instead_in_other_colours (name them with their colours), or a whole look in
+    one of whole_look_colours, where every part exists. Ask which they would
+    rather have before pricing anything up.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.
