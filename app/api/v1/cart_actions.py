@@ -128,3 +128,9 @@ def is_only_narrowing(text: str) -> bool:
     if _ADD_RE.search(said) or _CHECKOUT_RE.search(said):
         return False
     return bool(_NARROWING_RE.match(said))
+
+
+def asked_to_add(text: str) -> bool:
+    """They asked, in so many words, for something to go in the bag."""
+    said = " ".join((text or "").split())
+    return bool(said and _ADD_RE.search(said) and not _NEGATED_RE.search(said))

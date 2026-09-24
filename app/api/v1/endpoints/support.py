@@ -723,14 +723,16 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
         saved_token = identity.set_saved(req.saved)
-        # "choose size 12y" says which one, not "buy it" - unless we were the
-        # ones who just asked about adding, in which case it is their answer.
-        we_offered = any(
-            "add" in content.lower()
-            for role, content in history[-1:] if role == "assistant"
-        )
+        # "choose size 12y" says which one, not "buy it" - unless an add is
+        # already under way. That is not read off our own wording ("Which size
+        # would you like?" never says add); it is read off theirs: a shopper who
+        # asked for it in the bag a turn ago is answering the size we asked for.
+        mid_add = any(cart_actions.asked_to_add(content)
+                      for role, content in history[-4:] if role == "user") \
+            or any("add" in content.lower()
+                   for role, content in history[-1:] if role == "assistant")
         narrowing_token = identity.set_only_narrowing(
-            cart_actions.is_only_narrowing(req.message) and not we_offered)
+            cart_actions.is_only_narrowing(req.message) and not mid_add)
         country_token = market.set_country(req.context.country if req.context else None)
         showing_token = market.set_showing(req.context.currency if req.context else None)
         try:
