@@ -70,7 +70,7 @@ def _round_money(amount: Decimal) -> float:
     return float((amount / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step)
 
 
-async def in_our_money(amount: float, their_money: str, product_id: str) -> dict | None:
+async def in_our_money(amount: float, their_money: str, product_ids) -> dict | None:
     """What a budget in someone else's money buys here, priced off our own shelves.
 
     "Around £400" from a shopper being quoted rupees used to be answered with a
@@ -84,30 +84,47 @@ async def in_our_money(amount: float, their_money: str, product_id: str) -> dict
     there = CURRENCY_COUNTRY.get(code)
     if not here or not there or here == there or not amount:
         return None
+    ids = {str(i) for i in (product_ids if isinstance(product_ids, (list, set, tuple))
+                            else [product_ids]) if i}
+    if not ids:
+        return None
     try:
-        ours = await _prices("Product", {str(product_id)}, here)
-        theirs = await _prices("Product", {str(product_id)}, there)
+        ours = await _prices("Product", ids, here)
+        theirs = await _prices("Product", ids, there)
     except (ShopifyError, KeyError) as exc:
         logger.warning("No implied rate for %s -> %s: %s", code, here, exc)
         return None
-    pid = str(product_id)
-    if pid not in ours or pid not in theirs:
-        return None
 
-    def low(table):
-        price = table[pid]["minVariantPricing"]["price"]
+    def low(table, pid):
+        price = (table.get(pid) or {}).get("minVariantPricing", {}).get("price")
+        if not price:
+            return None, None
         return Decimal(str(price["amount"])), price["currencyCode"]
 
-    ours_amount, ours_code = low(ours)
-    theirs_amount, theirs_code = low(theirs)
-    if theirs_amount <= 0 or theirs_code != code:
+    # Each market rounds its own prices, so one piece alone gives a slightly
+    # different answer from the next (125 against a neighbour's 127). Take the
+    # middle of several and a single oddly-priced line cannot skew a budget.
+    rates, our_code, their_code = [], None, None
+    for pid in ids:
+        mine, mine_code = low(ours, pid)
+        yours, yours_code = low(theirs, pid)
+        if not mine or not yours or yours <= 0 or yours_code != code:
+            continue
+        rates.append(mine / yours)
+        our_code, their_code = mine_code, yours_code
+    if not rates:
         return None
+    rates.sort()
+    middle = rates[len(rates) // 2] if len(rates) % 2 else \
+        (rates[len(rates) // 2 - 1] + rates[len(rates) // 2]) / 2
     return {
-        "their_budget": float(amount), "their_currency": theirs_code,
-        "our_budget": _round_money(Decimal(str(amount)) * ours_amount / theirs_amount),
-        "our_currency": ours_code,
-        "how": f"what this shop charges for the same piece in both markets "
-               f"({theirs_amount} {theirs_code} against {ours_amount} {ours_code})",
+        "their_budget": float(amount), "their_currency": their_code,
+        "our_budget": _round_money(Decimal(str(amount)) * middle),
+        "our_currency": our_code,
+        "priced_from": len(rates),
+        "how": (f"what this shop itself charges in each market, across {len(rates)} "
+                f"pieces - about {middle.quantize(Decimal('0.01'))} {our_code} "
+                f"to the {their_code}"),
     }
 
 

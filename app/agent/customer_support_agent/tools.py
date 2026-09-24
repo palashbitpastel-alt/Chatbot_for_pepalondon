@@ -541,11 +541,11 @@ async def budget_in_our_money(amount: float, currency: str) -> str:
     """
     try:
         catalogue = await outfit.browse_catalogue()
-        pick = next((p for p in catalogue.get("products") or []
-                     if p.get("product_id") and p.get("price_from")), None)
-        if not pick:
+        priced = [p["product_id"] for p in catalogue.get("products") or []
+                  if p.get("product_id") and p.get("price_from")]
+        if not priced:
             return json.dumps({"converted": False, "reason": "nothing_priced"})
-        found = await market.in_our_money(amount, currency, pick["product_id"])
+        found = await market.in_our_money(amount, currency, priced[:9])
         if not found:
             return json.dumps({"converted": False,
                                "reason": "we_do_not_sell_in_that_money",
