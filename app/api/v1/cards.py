@@ -157,10 +157,14 @@ def _in_their_colour(item: dict) -> dict:
     """
     wanted = identity.wants_colour()
     variants = item.get("variants")
-    if not wanted or not isinstance(variants, list):
+    if not isinstance(variants, list) or not variants:
         return item
-    match = next((v for v in variants
-                  if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
+    match = None
+    if wanted:
+        match = next((v for v in variants
+                      if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
+    if not match:
+        match = _not_for_the_other_child(variants)
     if not match:
         return item
     return {**item,
@@ -168,6 +172,25 @@ def _in_their_colour(item: dict) -> dict:
             "option": match.get("option") or item.get("option"),
             "image": match.get("image") or item.get("image"),
             "url": match.get("url") or item.get("url")}
+
+
+# Colours the store only puts on girls' pieces. A shopper buying for a boy was
+# shown the Canvas Plimsolls in pink, twice - not because anything was tagged
+# wrong, but because a card takes the product's first variant and pink is the
+# one the shop lists first.
+HERS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral")
+
+
+def _not_for_the_other_child(variants: list) -> dict | None:
+    """A variant that suits the child being shopped for, when the first does not."""
+    if identity.shopping_for() != "Boys":
+        return None
+    first = next((v for v in variants if v.get("available")), None)
+    if not first or not any(h in str(first.get("option") or "").lower() for h in HERS):
+        return None
+    return next((v for v in variants
+                 if v.get("available")
+                 and not any(h in str(v.get("option") or "").lower() for h in HERS)), None)
 
 
 def _card(item: dict) -> dict:

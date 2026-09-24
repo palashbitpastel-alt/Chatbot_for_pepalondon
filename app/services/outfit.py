@@ -791,7 +791,11 @@ LOOK_PIECES = 3
 # the boys' bottoms come in Burgundy, Camel, Navy and Brown. The shopper is not
 # told that, so the look just looks incomplete. Naming the gap - and what would
 # close it - is the difference between a filter and a shop assistant.
-LOOK_ROLES = ("Top", "Bottoms", "Shoes")
+# Accessory earns its place here: asked for a whole burgundy look, the answer
+# was a jumper, trousers and shoes, and the shopper asked where the belt was.
+# We stock one for him; it is simply not burgundy, which is exactly the kind of
+# gap this reports.
+LOOK_ROLES = ("Top", "Bottoms", "Shoes", "Accessory")
 
 
 def _roles_of(pieces: list[dict]) -> set[str]:
