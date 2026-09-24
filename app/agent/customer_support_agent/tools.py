@@ -596,6 +596,11 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     the other child, nor one sized for another age, nor nightwear. left_out
     names anything dropped for those reasons, with which: mention it in half a
     sentence where it changes the answer, and never present it as in the look.
+    over_by means the look costs more than they said. Do NOT call this tool again
+    to try another combination - to_fit_the_budget already holds the answer: keep
+    lists what fits, drop what to leave out and why, new_total what it then
+    costs. Offer that, in one reply. Two calls to this tool in a turn is the most
+    there should ever be.
     not_an_outfit comes back when what you sent holds nothing to wear: say so
     rather than calling shoes and a belt a look.
     """

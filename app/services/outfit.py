@@ -540,6 +540,32 @@ async def cart_additions(items: list[dict]) -> dict:
     return result
 
 
+def _within(chosen: list[dict], allowance: float) -> dict:
+    """The same look, trimmed to the budget - what to drop, and what it then costs.
+
+    The clothes stay: an outfit without its trousers is not a cheaper outfit. So
+    the shoes and the accessories go first, dearest first, and only then is the
+    look declared impossible at this price.
+    """
+    keep = list(chosen)
+    dropped = []
+    spare = sorted((c for c in keep
+                    if _role(c.get("title") or "", None) not in CLOTHING),
+                   key=lambda c: -(c.get("line_total") or 0))
+    for piece in spare:
+        if sum(c.get("line_total") or 0 for c in keep) <= allowance:
+            break
+        keep.remove(piece)
+        dropped.append({"title": piece.get("title"), "price": piece.get("line_total")})
+    total = sum(c.get("line_total") or 0 for c in keep)
+    return {"possible": total <= allowance and bool(keep),
+            "keep": [{"title": c.get("title"), "handle": c.get("handle"),
+                      "variant_id": c.get("variant_id"), "price": c.get("line_total")}
+                     for c in keep],
+            "drop": dropped,
+            "new_total": float(total)}
+
+
 # ── Suggesting as the conversation goes ────────────────────────────────────
 # An outfit conversation used to be an interrogation - age, occasion, colour,
 # budget, one reply after another with nothing to look at. Told to show pieces
@@ -1621,6 +1647,12 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         result["within_budget"] = total <= allowance
         difference = allowance - total
         result["remaining" if difference >= 0 else "over_by"] = float(abs(difference))
+        if difference < 0:
+            # Over budget, the agent used to try again, and again: ten calls to
+            # this tool in one turn, the last of which hit the iteration ceiling
+            # and answered with nothing at all. Work out here what would fit, so
+            # there is something to say on the first call.
+            result["to_fit_the_budget"] = _within(chosen, float(allowance))
 
     # The frontend adds the look to the bag itself, so it just needs the variants.
     result["cart_items"] = [
