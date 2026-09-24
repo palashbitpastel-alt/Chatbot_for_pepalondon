@@ -48,6 +48,9 @@ query SupportProductSearch($query: String!, $first: Int!, $variants: Int!) {
       handle
       productType
       tags
+      description(truncateAt: 400)
+      options { name values }
+      collections(first: 5) { nodes { handle title } }
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -381,7 +384,42 @@ def _public_product(node: dict, currency: str) -> dict:
         # collection, because nothing downstream could tell them apart.
         "for": [name for name in AUDIENCE_TAGS
                 if name.lower() in {t.strip().lower() for t in node.get("tags") or []}],
+        # Everything a shopper asks next, on the card itself. Without these the
+        # agent had only a name and a price, so "is it cotton?", "does it come
+        # in 12Y?" and "would it do for a wedding?" each cost another lookup -
+        # and were often answered with "the page does not say".
+        **_what_it_is(node),
         "variants": [_public_variant(v, node) for v in variants],
+    }
+
+
+def _options_of_node(node: dict) -> dict[str, list[str]]:
+    return {(o.get("name") or "").strip().lower(): o.get("values") or []
+            for o in node.get("options") or []}
+
+
+def _what_it_is(node: dict) -> dict:
+    """What the piece is, in the store's own words: fabric, sizes, colours,
+    the shelves it sits on and a line of its description."""
+    from app.services import compare, occasions
+
+    description = node.get("description") or ""
+    options = _options_of_node(node)
+    colours = options.get("color") or options.get("colour") or []
+    sizes = options.get("size") or []
+    shelves = [c.get("title") for c in ((node.get("collections") or {}).get("nodes") or [])
+               if c.get("title")]
+    highlights = compare._highlights(node.get("descriptionHtml"))
+    return {
+        "about": compare._first_sentence(description, 180),
+        "fabric": compare._fabric(highlights, description),
+        "made_in": compare._made_in(highlights, description),
+        "colours": colours,
+        "sizes": sizes,
+        "size_range": (sizes[0] if len(sizes) == 1 else f"{sizes[0]} - {sizes[-1]}") if sizes else None,
+        "in_collections": shelves[:5],
+        "worn_for": ", ".join(occasions.of(node.get("title"), " ".join(node.get("tags") or []),
+                                           description)) or None,
     }
 
 
@@ -1024,6 +1062,9 @@ query SupportCategoryProductList($query: String!, $first: Int!, $variants: Int!)
       handle
       productType
       tags
+      description(truncateAt: 400)
+      options { name values }
+      collections(first: 5) { nodes { handle title } }
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -1055,6 +1096,9 @@ query SupportSizeScan($query: String!, $first: Int!, $cursor: String, $variants:
       handle
       productType
       tags
+      description(truncateAt: 400)
+      options { name values }
+      collections(first: 5) { nodes { handle title } }
       onlineStoreUrl
       totalInventory
       featuredMedia { ... on MediaImage { image { url altText } } }
