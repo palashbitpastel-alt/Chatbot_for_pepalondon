@@ -498,22 +498,26 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     part that is not in it contradicts the pieces you are about to offer, which
     is how "no blue shoes" ended up two lines above the blue plimsolls. Then offer BOTH ways round it, with the actual names - never
     "trousers in the colours we do stock" when the result hands you
-    instead_in_other_colours: say "the Navy Pocket Detail Chinos or the Burgundy
-    Corduroys, both 9800 INR". Never "a colour that has everything" when
+    instead_in_other_colours: name the pieces IT lists, with their own colours
+    and prices, never a name from this docstring. Never "a colour that has everything" when
     a_whole_look_is_possible_in_these_colours names it. Read that field
     literally: it holds OTHER colours, every part of an outfit existing in each.
     It is NEVER the colour in "wanted" - that is the colour with the gap, the
     whole reason you are speaking - and it is never the pieces on screen. If the
     list is empty, do not offer a whole look at all; offer the alternatives and
     stop. A shopper cannot choose between two things you have not named. The
-    whole answer, for missing=["Bottoms"], instead=[Navy chinos, Burgundy
-    corduroys] and whole_look=["Burgundy"], is:
+    shape of the whole answer - every <angled> part read from THIS result, never
+    from the words here, which are a skeleton and not an example of stock:
 
-      "We have no blue trousers in 10Y. Either keep the blue shirt and put him in
-       the Navy Pocket Detail Chinos or the Burgundy Corduroys, both 9800 INR -
-       or we do a whole burgundy look, top and bottoms. Which would you rather?"
+      "We have no <wanted> <missing role> in <size>. Either keep the <wanted>
+       <piece that did match> and put him in <a piece from instead, its colour,
+       its price> - or we do a whole <a colour from
+       a_whole_look_is_possible_in_these_colours> look, top and bottoms.
+       Which would you rather?"
 
-    Ask that one question before pricing anything up.
+    Filling one of those from memory puts a product we do not stock in front of
+    the shopper AND empties the row of pictures, which is matched against the
+    names you use. Ask that one question before pricing anything up.
     products now carries those alternatives too, each marked in_wanted_colour
     =false with a "because". They are drawn beside your answer, so NAME the ones
     you are recommending - the nearest bottoms, and the pieces that make the
