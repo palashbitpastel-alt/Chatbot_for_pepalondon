@@ -500,9 +500,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     "trousers in the colours we do stock" when the result hands you
     instead_in_other_colours: say "the Navy Pocket Detail Chinos or the Burgundy
     Corduroys, both 9800 INR". Never "a colour that has everything" when
-    a_whole_look_is_possible_in_these_colours names it: those are OTHER colours,
-    every part of an outfit existing in each, and never the pieces you have just
-    shown. A shopper cannot choose between two things you have not named. The
+    a_whole_look_is_possible_in_these_colours names it. Read that field
+    literally: it holds OTHER colours, every part of an outfit existing in each.
+    It is NEVER the colour in "wanted" - that is the colour with the gap, the
+    whole reason you are speaking - and it is never the pieces on screen. If the
+    list is empty, do not offer a whole look at all; offer the alternatives and
+    stop. A shopper cannot choose between two things you have not named. The
     whole answer, for missing=["Bottoms"], instead=[Navy chinos, Burgundy
     corduroys] and whole_look=["Burgundy"], is:
 
