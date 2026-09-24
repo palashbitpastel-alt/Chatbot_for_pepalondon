@@ -498,6 +498,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 async def complete_the_look(product: str, size: str = "", budget: float = 0) -> str:
     """The coordinated outfit around ONE piece - what goes with it.
 
+    reason="no_clothing_fits": nothing wearable comes in this child's size - only
+    shoes or accessories do. Say that plainly, name where the range stops, and
+    offer the nearest size. Never present shoes and a belt as an outfit.
+
     reason="need_age": the piece is sold across several ages and nobody has said
     which. Ask how old they are, in one short question, and nothing else - then
     call this again with their answer as size. Never pick an age yourself: the
@@ -545,6 +549,8 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     the other child, nor one sized for another age, nor nightwear. left_out
     names anything dropped for those reasons, with which: mention it in half a
     sentence where it changes the answer, and never present it as in the look.
+    not_an_outfit comes back when what you sent holds nothing to wear: say so
+    rather than calling shoes and a belt a look.
     """
     try:
         result = await outfit.build_outfit(items, budget or None)

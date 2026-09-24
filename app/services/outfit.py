@@ -670,6 +670,16 @@ COMPANIONS = {
     "Other": ("Top", "Bottoms", "Dress", "Shoes"),
 }
 DEFAULT_COMPANIONS = ("Top", "Bottoms", "Shoes", "Accessory")
+
+# An outfit needs at least one of these. Asked for a complete look for a twelve
+# year old boy - an age the boys' range does not reach - the answer came back as
+# a pair of plimsolls and a belt, called "2 pieces, matched". Shoes and a belt
+# are what you finish an outfit with, not the outfit.
+CLOTHING = ("Dress", "Top", "Bottoms", "Outerwear")
+
+
+def _has_clothing(pieces: list[dict]) -> bool:
+    return any((p.get("role") or _category(p.get("title") or "", None)) in CLOTHING for p in pieces)
 # Colours that sit with anything, so a look is never blocked on an exact match.
 NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
 LOOK_PIECES = 3
@@ -1037,6 +1047,19 @@ async def complete_the_look(product: str, size: str | None = None,
             item["size"] = picked_one["size"]
         return item
 
+    # Shoes and a belt are not a look. Where nothing wearable fits this child,
+    # say so instead of dressing the answer up as an outfit.
+    if not _has_clothing([anchor, *picked]):
+        return {
+            "found": False,
+            "reason": "no_clothing_fits",
+            "asked_for": product,
+            "size": size,
+            "for": audience,
+            "only_these_fit": [{"title": p["title"], "handle": p["handle"]} for p in picked][:4],
+            "nothing_else_fits": _range_note(stock, audience, age),
+        }
+
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
     if not picked and (note := _range_note(stock, audience, age)):
         look["nothing_else_fits"] = note
@@ -1327,6 +1350,20 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
                 "url": product_url(product, variant_id),
             }
         )
+
+    if chosen and not _has_clothing(
+            [{"title": line.get("title"), "role": _category(line.get("title") or "", None)}
+             for line in chosen]):
+        # Priced fine, but it is shoes and accessories: not an outfit.
+        return {
+            "outfit": chosen,
+            "item_count": len(chosen),
+            "currency": currency,
+            "total": float(total),
+            "problems": problems,
+            "left_out": left_out,
+            "not_an_outfit": "Nothing to wear in this - only shoes or accessories.",
+        }
 
     result: dict = {
         "outfit": chosen,
