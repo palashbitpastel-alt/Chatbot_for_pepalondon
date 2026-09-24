@@ -201,6 +201,14 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
         return None
     if not isinstance(data, dict) or data.get("error"):
         return None
+    # "There is no outfit for him, our boys' range stops at 10Y" must not be
+    # drawn above a row of shoes: the picture is the answer a shopper reads, and
+    # two pairs of boots under that sentence is still an answer of two pairs of
+    # boots. The reply names them to explain what does NOT work, so the mention
+    # rule below keeps them - this is the one case where being mentioned is a
+    # reason to leave a product out.
+    if data.get("not_an_outfit") or data.get("has_clothing") is False:
+        return None
 
     currency = data.get("currency")
 

@@ -50,7 +50,8 @@ async def search_products(query: str) -> str:
     say so plainly, never fill it in yourself.
     """
     try:
-        return json.dumps(await shopify_storefront.search_products(query), ensure_ascii=False)
+        return json.dumps(_for_this_shopper(await shopify_storefront.search_products(query)),
+                          ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("search_products", exc)
 
@@ -458,7 +459,8 @@ async def get_best_sellers(limit: int = 5) -> str:
     guess up as a best seller.
     """
     try:
-        return json.dumps(await shopify_storefront.best_sellers(limit), ensure_ascii=False)
+        return json.dumps(_for_this_shopper(await shopify_storefront.best_sellers(limit)),
+                          ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("get_best_sellers", exc)
 
@@ -533,7 +535,7 @@ async def browse_catalogue() -> str:
     product's handle, category, price, colours, sizes, and the store currency.
     """
     try:
-        return json.dumps(await outfit.browse_catalogue(), ensure_ascii=False)
+        return json.dumps(_for_this_shopper(await outfit.browse_catalogue()), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_catalogue", exc)
 
@@ -626,7 +628,8 @@ async def browse_in_size(size: str) -> str:
     12Y") leaves the shopper reading a number with unnamed cards beside it.
     """
     try:
-        return json.dumps(await shopify_storefront.products_in_size(size), ensure_ascii=False)
+        return json.dumps(_for_this_shopper(await shopify_storefront.products_in_size(size)),
+                          ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_in_size", exc)
 
@@ -640,6 +643,11 @@ def _for_this_shopper(found: dict) -> dict:
     downstream knew who we were shopping for. Pieces the store has not tagged
     for anyone stay - they suit either - and the reply says what was left out,
     so "show me the boys' ones too" still works.
+
+    Every listing runs through here, not only a category browse. Shopping for a
+    boy, "show me dresses" went to search_products, which had never heard of the
+    audience, and answered "these are all girls' pieces, so nothing here is for
+    a boy" - above four photographs of girls in dresses.
     """
     who = identity.shopping_for()
     products = found.get("products") if isinstance(found, dict) else None
@@ -810,7 +818,8 @@ async def recommend_for_me() -> str:
         return _not_signed_in()
     try:
         history = await shopify_storefront.customer_orders(shopper.email, limit=10)
-        return json.dumps(await outfit.recommend_from_orders(history["orders"]), ensure_ascii=False)
+        return json.dumps(_for_this_shopper(await outfit.recommend_from_orders(history["orders"])),
+                          ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("recommend_for_me", exc)
 
