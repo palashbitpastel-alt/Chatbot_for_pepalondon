@@ -482,6 +482,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     say these are the nearest rather than calling them wedding pieces.
     category_note means we sell that kind but none suits this child - say exactly
     that ("our coats are girls' only at the moment") and never "we have no coats".
+    has_clothing=false means the only pieces that fit are shoes or accessories:
+    there is no outfit to build for this child. Say that plainly, name where the
+    range stops from nothing_wearable_fits, and do NOT ask for a budget or offer
+    to build a look you cannot build.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.

@@ -629,6 +629,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                   "age": age, "budget": budget or None, "category": wanted_category},
         "category_note": category_note,
         "nothing_else_fits": _range_note(catalogue["products"], audience, age) if not picked else None,
+        # Whether anything here can actually be worn. Asked for an outfit for a
+        # twelve year old boy, the suggestions were two pairs of shoes - and the
+        # next question was "what is your budget for the outfit?".
+        "has_clothing": _has_clothing(picked),
+        "nothing_wearable_fits": None if _has_clothing(picked)
+        else _range_note(catalogue["products"], audience, age),
         "occasion_matched": bool(occasion) and any(
             occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,
