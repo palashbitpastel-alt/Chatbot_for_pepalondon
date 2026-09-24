@@ -787,7 +787,10 @@ def _colour_gaps(before: list[dict], after: list[dict], wanted: str, limit: int 
 
     return {"wanted": wanted, "missing": missing,
             "instead_in_other_colours": instead,
-            "whole_look_colours": whole}
+            # Named so it cannot be read as "the look I have just shown you":
+            # the agent answered "or the whole look in blue" and then listed a
+            # green jumper and brown shorts.
+            "a_whole_look_is_possible_in_these_colours": whole}
 
 
 def _colour_words(piece: dict) -> set[str]:

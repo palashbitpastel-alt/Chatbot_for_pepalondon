@@ -500,9 +500,17 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     "trousers in the colours we do stock" when the result hands you
     instead_in_other_colours: say "the Navy Pocket Detail Chinos or the Burgundy
     Corduroys, both 9800 INR". Never "a colour that has everything" when
-    whole_look_colours names it: say "or the whole outfit in burgundy". A shopper
-    cannot choose between two things you have not named. Ask which they would
-    rather have before pricing anything up.
+    a_whole_look_is_possible_in_these_colours names it: those are OTHER colours,
+    every part of an outfit existing in each, and never the pieces you have just
+    shown. A shopper cannot choose between two things you have not named. The
+    whole answer, for missing=["Bottoms"], instead=[Navy chinos, Burgundy
+    corduroys] and whole_look=["Burgundy"], is:
+
+      "We have no blue trousers in 10Y. Either keep the blue shirt and put him in
+       the Navy Pocket Detail Chinos or the Burgundy Corduroys, both 9800 INR -
+       or we do a whole burgundy look, top and bottoms. Which would you rather?"
+
+    Ask that one question before pricing anything up.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.
