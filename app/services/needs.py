@@ -33,10 +33,12 @@ _SIZE = re.compile(r"\b(?:size\s+)?(\d{1,2}\s*-\s*\d{1,2}\s*y|\d{1,2}\s*y)\b|\bs
 # "under £200", "around £400", "£150 budget", "budget of 200", "up to 150"
 _BUDGET = re.compile(
     r"(?:(under|below|less than|up to|max(?:imum)?|around|about|roughly|approx(?:imately)?|budget(?: of| is)?)\s*)?"
-    r"([£$€₹])\s?(\d{2,6}(?:\.\d{2})?)"
+    # Thousands separators included: "₹13,800" was read as ₹13, a budget that
+    # rules out every piece in the shop, and the shopper was never told why.
+    r"([£$€₹])\s?(\d{1,3}(?:,\d{3})+|\d{2,7}(?:\.\d{2})?)"
     # ...or no sign at all: "around 30000", "budget of 500". Three figures at
     # least, so an age or a size is never read as money.
-    r"|(?:(under|below|less than|up to|max(?:imum)?|around|about|roughly|approx(?:imately)?|budget(?: of| is)?)\s*)(\d{3,6})",
+    r"|(?:(under|below|less than|up to|max(?:imum)?|around|about|roughly|approx(?:imately)?|budget(?: of| is)?)\s*)(\d{1,3}(?:,\d{3})+|\d{3,7})",
     re.I,
 )
 
