@@ -178,7 +178,8 @@ def _in_their_colour(item: dict) -> dict:
 # shown the Canvas Plimsolls in pink, twice - not because anything was tagged
 # wrong, but because a card takes the product's first variant and pink is the
 # one the shop lists first.
-HERS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral")
+HERS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral",
+        "raspberry", "magenta", "cerise", "bubblegum", "candy")
 
 
 def _not_for_the_other_child(variants: list) -> dict | None:

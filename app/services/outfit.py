@@ -879,7 +879,11 @@ def _colour_gaps(before: list[dict], after: list[dict], wanted: str, limit: int 
             "a_whole_look_is_possible_in_these_colours": whole}
 
 
-HER_COLOURS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral")
+# Colour names this shop puts on girls' pieces. A list, and honestly a list -
+# the pink plimsoll is called "Dusty Raspberry", which is why naming only the
+# obvious words missed it.
+HER_COLOURS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral",
+               "raspberry", "magenta", "cerise", "bubblegum", "candy")
 
 
 def _photo_of(piece: dict, wanted: str, audience: str | None) -> str | None:
