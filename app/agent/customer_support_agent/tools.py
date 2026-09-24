@@ -570,7 +570,13 @@ async def browse_catalogue() -> str:
     product's handle, category, price, colours, sizes, and the store currency.
     """
     try:
-        return json.dumps(_for_this_shopper(await outfit.browse_catalogue()), ensure_ascii=False)
+        found = _for_this_shopper(await outfit.browse_catalogue())
+        # The catalogue carries working data the model has no use for - a photo
+        # per colour, every colour/size/stock triple. Ninety products' worth of
+        # image URLs would crowd out the answer.
+        listed = [{k: v for k, v in p.items() if k not in ("shots", "combinations")}
+                  for p in (found.get("products") or [])]
+        return json.dumps({**found, "products": listed}, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_catalogue", exc)
 

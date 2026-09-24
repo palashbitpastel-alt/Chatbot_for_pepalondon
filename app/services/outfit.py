@@ -350,6 +350,12 @@ async def browse_catalogue() -> dict:
                      "available": bool(v.get("availableForSale"))}
                     for v in variants
                 ],
+                # Which photograph belongs to which colour. A suggestion card
+                # takes the product's own featured image, and for the Canvas
+                # Plimsolls that is the pink pair - shown twice to a shopper
+                # buying for a boy.
+                "shots": {(_colour_of(v) or "").strip().lower(): img
+                          for v in variants if (img := variant_image(v))},
                 "image": product_image(node),
                 "url": product_url(node),
             }
@@ -754,7 +760,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "colour": _colour_match(p["colors"], wanted) if wanted else None,
                 "colors": p["colors"],
                 "sizes": p["sizes"],
-                "image": p["image"],
+                "image": _photo_of(p, wanted, audience),
                 "url": p["url"],
                 # Present only on a piece offered in place of the colour asked for.
                 **({"in_wanted_colour": False, "because": p["because"]}
@@ -871,6 +877,28 @@ def _colour_gaps(before: list[dict], after: list[dict], wanted: str, limit: int 
             # the agent answered "or the whole look in blue" and then listed a
             # green jumper and brown shorts.
             "a_whole_look_is_possible_in_these_colours": whole}
+
+
+HER_COLOURS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral")
+
+
+def _photo_of(piece: dict, wanted: str, audience: str | None) -> str | None:
+    """The picture to put on the card: their colour, or at least not the other
+    child's. The plimsolls come in blue and in pink, and the shop lists pink."""
+    shots = piece.get("shots") or {}
+    if not shots:
+        return piece.get("image")
+    if wanted:
+        for name, shot in shots.items():
+            if wanted in name:
+                return shot
+    if audience == "Boys":
+        default = (piece.get("colors") or [""])[0].strip().lower()
+        if any(h in default for h in HER_COLOURS):
+            for name, shot in shots.items():
+                if not any(h in name for h in HER_COLOURS):
+                    return shot
+    return piece.get("image")
 
 
 def _colour_words(piece: dict) -> set[str]:
