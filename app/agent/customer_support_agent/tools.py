@@ -13,8 +13,6 @@ import json
 import logging
 import re
 
-from contextvars import ContextVar
-
 from langchain_core.tools import tool
 
 from app.core.config import settings
@@ -41,19 +39,10 @@ async def search_products(query: str) -> str:
     """Search the live catalogue for one thing a shopper named.
 
     query: a short term like "hairband" or a product name; empty lists what is sold.
-    Returns up to 10 buyable products with price, currency and stock - and with
-    about (a line of the store's own description), fabric, made_in, colours,
-    sizes, size_range, in_collections and worn_for. details holds whatever else
-    the merchant has recorded against that product - fabric, age group, sleeve
-    length, care - as words, and is often where the real answer is. Use all of
-    it: "is it cotton", "does it come in 12Y", "can it be machine washed",
-    "would it suit a wedding" are answered from these rather than by looking the
-    same piece up again. A field that is empty means the store has not said it:
-    say so plainly, never fill it in yourself.
+    Returns up to 10 buyable products with price, currency and stock.
     """
     try:
-        return json.dumps(_for_this_shopper(await shopify_storefront.search_products(query)),
-                          ensure_ascii=False)
+        return json.dumps(await shopify_storefront.search_products(query), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("search_products", exc)
 
@@ -461,8 +450,7 @@ async def get_best_sellers(limit: int = 5) -> str:
     guess up as a best seller.
     """
     try:
-        return json.dumps(_for_this_shopper(await shopify_storefront.best_sellers(limit)),
-                          ensure_ascii=False)
+        return json.dumps(await shopify_storefront.best_sellers(limit), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("get_best_sellers", exc)
 
@@ -486,45 +474,6 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     say these are the nearest rather than calling them wedding pieces.
     category_note means we sell that kind but none suits this child - say exactly
     that ("our coats are girls' only at the moment") and never "we have no coats".
-    has_clothing=false means the only pieces that fit are shoes or accessories:
-    there is no outfit to build for this child. Say that plainly, name where the
-    range stops from nothing_wearable_fits, and do NOT ask for a budget or offer
-    to build a look you cannot build.
-    season_matched=true means the store itself tags these pieces for the season
-    they asked about - say so ("these are our winter pieces"). Where it is false
-    they are the nearest, not the season's own.
-    colour_gaps is what the colour cost. missing lists the parts of an outfit
-    that exist for this child but NOT in the colour they asked for - say so in
-    as many words ("we have no blue trousers in 10Y"), never leave the gap
-    unmentioned. missing is the WHOLE list of gaps and the only one: naming a
-    part that is not in it contradicts the pieces you are about to offer, which
-    is how "no blue shoes" ended up two lines above the blue plimsolls. Then offer BOTH ways round it, with the actual names - never
-    "trousers in the colours we do stock" when the result hands you
-    instead_in_other_colours: name the pieces IT lists, with their own colours
-    and prices, never a name from this docstring. Never "a colour that has everything" when
-    a_whole_look_is_possible_in_these_colours names it. Read that field
-    literally: it holds OTHER colours, every part of an outfit existing in each.
-    It is NEVER the colour in "wanted" - that is the colour with the gap, the
-    whole reason you are speaking - and it is never the pieces on screen. If the
-    list is empty, do not offer a whole look at all; offer the alternatives and
-    stop. A shopper cannot choose between two things you have not named. The
-    shape of the whole answer - every <angled> part read from THIS result, never
-    from the words here, which are a skeleton and not an example of stock:
-
-      "We have no <wanted> <missing role> in <size>. Either keep the <wanted>
-       <piece that did match> and put him in <a piece from instead, its colour,
-       its price> - or we do a whole <a colour from
-       a_whole_look_is_possible_in_these_colours> look, top and bottoms.
-       Which would you rather?"
-
-    Filling one of those from memory puts a product we do not stock in front of
-    the shopper AND empties the row of pictures, which is matched against the
-    names you use. Ask that one question before pricing anything up.
-    products now carries those alternatives too, each marked in_wanted_colour
-    =false with a "because". They are drawn beside your answer, so NAME the ones
-    you are recommending - the nearest bottoms, and the pieces that make the
-    whole look in the other colour - or they are shown with nothing said about
-    them. Never present a marked piece as being in the colour they asked for.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.
@@ -540,10 +489,6 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 @tool
 async def complete_the_look(product: str, size: str = "", budget: float = 0) -> str:
     """The coordinated outfit around ONE piece - what goes with it.
-
-    reason="no_clothing_fits": nothing wearable comes in this child's size - only
-    shoes or accessories do. Say that plainly, name where the range stops, and
-    offer the nearest size. Never present shoes and a belt as an outfit.
 
     reason="need_age": the piece is sold across several ages and nobody has said
     which. Ask how old they are, in one short question, and nothing else - then
@@ -572,21 +517,9 @@ async def browse_catalogue() -> str:
     product's handle, category, price, colours, sizes, and the store currency.
     """
     try:
-        found = _for_this_shopper(await outfit.browse_catalogue())
-        # The catalogue carries working data the model has no use for - a photo
-        # per colour, every colour/size/stock triple. Ninety products' worth of
-        # image URLs would crowd out the answer.
-        listed = [{k: v for k, v in p.items() if k not in ("shots", "combinations")}
-                  for p in (found.get("products") or [])]
-        return json.dumps({**found, "products": listed}, ensure_ascii=False)
+        return json.dumps(await outfit.browse_catalogue(), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_catalogue", exc)
-
-
-# How many looks one turn may price. A ContextVar, so it counts per request and
-# never leaks between shoppers.
-_builds: ContextVar[int] = ContextVar("build_outfit_calls", default=0)
-MAX_BUILDS = 2
 
 
 @tool
@@ -604,27 +537,7 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     the other child, nor one sized for another age, nor nightwear. left_out
     names anything dropped for those reasons, with which: mention it in half a
     sentence where it changes the answer, and never present it as in the look.
-    over_by means the look costs more than they said. Do NOT call this tool again
-    to try another combination - to_fit_the_budget already holds the answer: keep
-    lists what fits, drop what to leave out and why, new_total what it then
-    costs. Offer that, in one reply. Two calls to this tool in a turn is the most
-    there should ever be.
-    not_an_outfit comes back when what you sent holds nothing to wear: say so
-    rather than calling shoes and a belt a look.
     """
-    # Telling it not to retry was not enough: a look over budget still drew ten
-    # calls in one turn, and the tenth ran the agent out of turns so the shopper
-    # got an empty reply. After the second, the tool stops answering and says so.
-    built = _builds.get() + 1
-    _builds.set(built)
-    if built > MAX_BUILDS:
-        return json.dumps({
-            "error": "already_built",
-            "built_this_turn": built - 1,
-            "tell_the_shopper": ("Answer now from the look you already have. If it was over "
-                                 "budget, use its to_fit_the_budget: what to keep, what to "
-                                 "leave out, and what it then costs."),
-        }, ensure_ascii=False)
     try:
         result = await outfit.build_outfit(items, budget or None)
         if result.get("outfit"):
@@ -695,8 +608,7 @@ async def browse_in_size(size: str) -> str:
     12Y") leaves the shopper reading a number with unnamed cards beside it.
     """
     try:
-        return json.dumps(_for_this_shopper(await shopify_storefront.products_in_size(size)),
-                          ensure_ascii=False)
+        return json.dumps(await shopify_storefront.products_in_size(size), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_in_size", exc)
 
@@ -710,11 +622,6 @@ def _for_this_shopper(found: dict) -> dict:
     downstream knew who we were shopping for. Pieces the store has not tagged
     for anyone stay - they suit either - and the reply says what was left out,
     so "show me the boys' ones too" still works.
-
-    Every listing runs through here, not only a category browse. Shopping for a
-    boy, "show me dresses" went to search_products, which had never heard of the
-    audience, and answered "these are all girls' pieces, so nothing here is for
-    a boy" - above four photographs of girls in dresses.
     """
     who = identity.shopping_for()
     products = found.get("products") if isinstance(found, dict) else None
@@ -885,8 +792,7 @@ async def recommend_for_me() -> str:
         return _not_signed_in()
     try:
         history = await shopify_storefront.customer_orders(shopper.email, limit=10)
-        return json.dumps(_for_this_shopper(await outfit.recommend_from_orders(history["orders"])),
-                          ensure_ascii=False)
+        return json.dumps(await outfit.recommend_from_orders(history["orders"]), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("recommend_for_me", exc)
 

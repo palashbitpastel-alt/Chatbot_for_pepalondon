@@ -253,19 +253,6 @@ def _resolve_session(session_id: str | None) -> str:
     return SESSION_PREFIX + uuid.uuid4().hex
 
 
-def _nothing_said(cards: "CardCollector") -> str:
-    """Something to say when the agent said nothing, built from what it found."""
-    look = (cards.outfit or {}).get("items") or []
-    found = (cards.products or {}).get("items") or []
-    if look:
-        names = ", ".join(i.get("title", "") for i in look[:3])
-        return f"Here is the look I put together: {names}. Tell me what to change and I will."
-    if found:
-        return ("Here is what I found. Tell me the age, the occasion or a budget "
-                "and I can narrow it down.")
-    return ("Sorry - I lost my thread there. Ask me again and I will pick it up.")
-
-
 async def _load_history(session_id: str, asking: str = "") -> list[tuple[str, str]]:
     async with AsyncSessionLocal() as db:
         rows = (
@@ -716,15 +703,6 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset_saved(saved_token)
             market.reset_country(country_token)
             market.reset_showing(showing_token)
-
-        # An agent that spent its turns on tool calls can finish with nothing to
-        # say, and silence above a row of products is the worst answer we give.
-        # Whatever it found is still there, so say that much.
-        if not reply.strip():
-            logger.warning("Empty reply for session %s - falling back", session_id)
-            reply = _nothing_said(cards)
-            yield _sse("reset", {})
-            yield _sse("token", {"text": reply})
 
         await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still

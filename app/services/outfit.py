@@ -42,13 +42,7 @@ OUTFIT_FORMAT = (
 # productType is authoritative when the merchant sets it. Most of this store's
 # products leave it blank, so fall back to reading the title.
 CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
-    # Footwear the store actually sells, not only the words for it: "Canvas
-    # Plimsolls" matched none of these, so its ROLE came out "Other" while its
-    # product type said Shoes. A blue plimsoll was then shown on screen under
-    # "we have no blue shoes in 10Y".
-    ("Shoes", ("shoe", "boot", "bootie", "sandal", "trainer", "sneaker", "pump", "loafer",
-               "plimsoll", "plimsole", "mary jane", "slipper", "espadrille", "brogue",
-               "moccasin", "clog", "welly", "wellington", "t bar", "t-bar")),
+    ("Shoes", ("shoe", "boot", "sandal", "trainer", "sneaker", "pump", "loafer")),
     ("Dress", ("dress", "pinafore", "romper", "gown")),
     ("Top", ("shirt", "blouse", "top", "jumper", "cardigan", "sweater", "sweatshirt", "tee")),
     ("Bottoms", ("trouser", "short", "skirt", "legging", "jean", "dungaree")),
@@ -69,7 +63,6 @@ query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!, $cursor: S
       tags
       onlineStoreUrl
       description(truncateAt: 240)
-      season: metafield(namespace: "custom", key: "season") { value }
       featuredMedia { ... on MediaImage { image { url altText } } }
       options { name values }
       variants(first: $variants) {
@@ -119,29 +112,6 @@ def _category(title: str, product_type: str | None) -> str:
         if any(word in lowered for word in keywords):
             return label
     return "Other"
-
-
-# The store's own product types, mapped to the part a piece plays in an outfit.
-# A role read from the title alone is blind to anything the words above miss, and
-# the shop has already filed every product under a type.
-TYPE_ROLES = {
-    "shoes": "Shoes", "boots": "Shoes", "sandals": "Shoes", "trainers": "Shoes",
-    "dress": "Dress", "dresses": "Dress", "romper": "Dress", "rompers": "Dress",
-    "shirt": "Top", "blouse": "Top", "sweater": "Top", "jumper": "Top",
-    "cardigan": "Top", "knitwear": "Top", "t-shirt": "Top", "tops": "Top",
-    "trousers": "Bottoms", "shorts": "Bottoms", "skirt": "Bottoms", "skirts": "Bottoms",
-    "coat": "Outerwear", "coats": "Outerwear", "jacket": "Outerwear", "jackets": "Outerwear",
-    "hat": "Accessory", "hats": "Accessory", "socks": "Accessory", "bib": "Accessory",
-    "accessories": "Accessory", "tights": "Accessory", "belts": "Accessory",
-}
-
-
-def _role(title: str, product_type: str | None) -> str:
-    """What this piece DOES in an outfit, whatever the shop files it under."""
-    by_name = _category(title, None)
-    if by_name != "Other":
-        return by_name
-    return TYPE_ROLES.get((product_type or "").strip().lower(), "Other")
 
 
 def _money(value) -> Decimal:
@@ -228,48 +198,15 @@ COOL_PIECES = ("linen", "sleeveless", "short sleeve", "shorts", "sandal", "swim"
                "sun", "romper", "cotton", "broderie", "organza", "voile")
 
 
-# A season the merchant has stated on the product itself, in the custom.season
-# metafield. Read straight from the catalogue, so it beats any guess made from
-# the name: "Cream Boy\'s Belt" reads as neither warm nor cool, and the store
-# says Spring and Summer.
-ALL_YEAR = "all year"
-
-
-def _seasons_of(node: dict) -> list[str]:
-    """The seasons stated on the product, from the store's own metafield.
-
-    A list metafield arrives as a JSON string ('["Autumn","Winter"]'); a plain
-    one arrives as the word itself. Anything unreadable is no statement at all,
-    and the name-based guess takes over.
-    """
-    raw = ((node.get("season") or {}).get("value") or "").strip()
-    if not raw:
-        return []
-    if raw.startswith("["):
-        try:
-            listed = json.loads(raw)
-        except ValueError:
-            return []
-        return [str(x) for x in listed if x]
-    return [raw]
-
-
-def _stated_seasons(piece: dict) -> list[str]:
-    return [s for s in (piece.get("seasons") or []) if s]
-
-
 def _suits_season(piece: dict, season: str | None) -> bool:
     """Whether a piece belongs in a look for this season.
 
-    Where the store has stated the seasons, that is the answer. Otherwise only
-    the extremes are ruled out: nothing wool-lined in summer, nothing sleeveless
-    as the whole answer in winter. Everything else is left alone, since most
-    childrenswear is worn all year.
+    Only the extremes are ruled out: nothing wool-lined in summer, nothing
+    sleeveless as the whole answer in winter. Everything else is left alone,
+    since most childrenswear is worn all year.
     """
     if not season:
         return True
-    if stated := _stated_seasons(piece):
-        return any(season.lower() in s.lower() or ALL_YEAR in s.lower() for s in stated)
     words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
     if season == "Summer":
         return not any(w in words for w in WARM_PIECES)
@@ -280,11 +217,6 @@ def _season_first(piece: dict, season: str | None) -> int:
     """0 for a piece the season calls for, 1 for the rest - a sort key."""
     if not season:
         return 1
-    if stated := _stated_seasons(piece):
-        # Named for this season outranks "all year round", which outranks a guess.
-        if any(season.lower() in s.lower() for s in stated):
-            return 0
-        return 1 if any(ALL_YEAR in s.lower() for s in stated) else 2
     words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
     wanted = WARM_PIECES if season in ("Winter", "Autumn") else COOL_PIECES
     return 0 if any(w in words for w in wanted) else 1
@@ -331,12 +263,10 @@ async def browse_catalogue() -> dict:
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
-                "role": _role(node["title"], node.get("productType")),
+                "role": _category(node["title"], None),
                 "for": _suits(node.get("tags")),
                 "occasions": occasions.of(node.get("title"), " ".join(node.get("tags") or []),
                                           node.get("description")),
-                # What the merchant says, not what the name suggests.
-                "seasons": _seasons_of(node),
                 "price_from": float(min(prices)) if prices else None,
                 "price_to": float(max(prices)) if prices else None,
                 "in_stock": any(v["availableForSale"] for v in variants),
@@ -350,12 +280,6 @@ async def browse_catalogue() -> dict:
                      "available": bool(v.get("availableForSale"))}
                     for v in variants
                 ],
-                # Which photograph belongs to which colour. A suggestion card
-                # takes the product's own featured image, and for the Canvas
-                # Plimsolls that is the pink pair - shown twice to a shopper
-                # buying for a boy.
-                "shots": {(_colour_of(v) or "").strip().lower(): img
-                          for v in variants if (img := variant_image(v))},
                 "image": product_image(node),
                 "url": product_url(node),
             }
@@ -540,32 +464,6 @@ async def cart_additions(items: list[dict]) -> dict:
     return result
 
 
-def _within(chosen: list[dict], allowance: float) -> dict:
-    """The same look, trimmed to the budget - what to drop, and what it then costs.
-
-    The clothes stay: an outfit without its trousers is not a cheaper outfit. So
-    the shoes and the accessories go first, dearest first, and only then is the
-    look declared impossible at this price.
-    """
-    keep = list(chosen)
-    dropped = []
-    spare = sorted((c for c in keep
-                    if _role(c.get("title") or "", None) not in CLOTHING),
-                   key=lambda c: -(c.get("line_total") or 0))
-    for piece in spare:
-        if sum(c.get("line_total") or 0 for c in keep) <= allowance:
-            break
-        keep.remove(piece)
-        dropped.append({"title": piece.get("title"), "price": piece.get("line_total")})
-    total = sum(c.get("line_total") or 0 for c in keep)
-    return {"possible": total <= allowance and bool(keep),
-            "keep": [{"title": c.get("title"), "handle": c.get("handle"),
-                      "variant_id": c.get("variant_id"), "price": c.get("line_total")}
-                     for c in keep],
-            "drop": dropped,
-            "new_total": float(total)}
-
-
 # ── Suggesting as the conversation goes ────────────────────────────────────
 # An outfit conversation used to be an interrogation - age, occasion, colour,
 # budget, one reply after another with nothing to look at. Told to show pieces
@@ -585,11 +483,6 @@ _WHO = {
 SUGGESTION_LIMIT = 4
 
 
-# A size that names an age: "10Y", "18M", "12 mths". Lettered and centimetre
-# runs carry none, and must not be read as "does not fit".
-_AGE_IN_SIZE = re.compile(r"\d+\s*(?:Y|YR|YRS|YEAR|M|MTH|MTHS|MONTH)S?\b", re.I)
-
-
 def _fits_age(sizes: list[str], age: int | None) -> bool:
     """Whether a piece comes in a size for this age. Pieces with no size run fit."""
     if age is None or not sizes:
@@ -606,13 +499,6 @@ def _fits_age(sizes: list[str], age: int | None) -> bool:
             low, _, high = size[:-1].partition("-")
             if low.isdigit() and high.isdigit() and int(low) <= age <= int(high):
                 return True
-    # A size run that states no age at all cannot rule a piece out on age. Belts
-    # run "S / 60cm" and "m-70-cm", hats "S-L": none of that parses as an age, so
-    # every one of them was dropped the moment a shopper mentioned how old the
-    # child is - which is the question we ask first. The belt a shopper went
-    # looking for had been filtered out before the look was ever built.
-    if not any(_AGE_IN_SIZE.search(x) for x in sizes):
-        return True
     return False
 
 
@@ -708,14 +594,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
             wanted_category = None
 
     colour_matched = None
-    colour_gaps = None
     if wanted:
         coloured = [p for p in pool if _colour_match(p["colors"], wanted)]
         colour_matched = bool(coloured)
         # Asked for navy, shown navy - padding the row with other colours would
         # have the agent calling a powder-blue shirt navy.
         if coloured:
-            colour_gaps = _colour_gaps(pool, coloured, wanted)
             pool = coloured
 
     # Best fit first: the occasion the store's words actually place it at, then
@@ -739,39 +623,15 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
             break
 
     still_to_ask = [name for name, have in (("age", age), ("budget", budget)) if not have]
-
-    # The colour matches first, then the pieces we are recommending INSTEAD -
-    # the nearest bottoms, the makings of a whole look in a colour we stock
-    # throughout. They are marked, so nothing here can be passed off as the
-    # colour that was asked for.
-    shown, seen_handles = list(picked), {p["handle"] for p in picked}
-    for piece in (colour_gaps or {}).get("show") or []:
-        if piece["handle"] not in seen_handles:
-            seen_handles.add(piece["handle"])
-            shown.append(piece)
-
     return {
         "currency": catalogue["currency"],
         "known": {"for": audience, "colour": colour or None, "occasion": occasion or None,
                   "age": age, "budget": budget or None, "category": wanted_category},
         "category_note": category_note,
         "nothing_else_fits": _range_note(catalogue["products"], audience, age) if not picked else None,
-        # Whether anything here can actually be worn. Asked for an outfit for a
-        # twelve year old boy, the suggestions were two pairs of shoes - and the
-        # next question was "what is your budget for the outfit?".
-        "has_clothing": _has_clothing(picked),
-        "nothing_wearable_fits": None if _has_clothing(picked)
-        else _range_note(catalogue["products"], audience, age),
         "occasion_matched": bool(occasion) and any(
             occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
-        # Whether the store itself says these are worn in this season, so the
-        # answer is "here are our winter pieces" and not "nothing here is made
-        # for winter" above the very booties the merchant tagged Winter.
-        "season_matched": bool(season) and any(
-            any(season.lower() in x.lower() for x in _stated_seasons(p)) for p in picked),
         "colour_matched": colour_matched,
-        # What the colour left out, and the two ways to close it.
-        "colour_gaps": colour_gaps,
         "still_to_ask": still_to_ask,
         "count": len(picked),
         "products": [
@@ -786,13 +646,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "colour": _colour_match(p["colors"], wanted) if wanted else None,
                 "colors": p["colors"],
                 "sizes": p["sizes"],
-                "image": _photo_of(p, wanted, audience),
+                "image": p["image"],
                 "url": p["url"],
-                # Present only on a piece offered in place of the colour asked for.
-                **({"in_wanted_colour": False, "because": p["because"]}
-                   if p.get("because") else {}),
             }
-            for p in shown
+            for p in picked
         ],
     }
 
@@ -813,131 +670,9 @@ COMPANIONS = {
     "Other": ("Top", "Bottoms", "Dress", "Shoes"),
 }
 DEFAULT_COMPANIONS = ("Top", "Bottoms", "Shoes", "Accessory")
-
-# An outfit needs at least one of these. Asked for a complete look for a twelve
-# year old boy - an age the boys' range does not reach - the answer came back as
-# a pair of plimsolls and a belt, called "2 pieces, matched". Shoes and a belt
-# are what you finish an outfit with, not the outfit.
-CLOTHING = ("Dress", "Top", "Bottoms", "Outerwear")
-
-
-def _has_clothing(pieces: list[dict]) -> bool:
-    return any((p.get("role") or _role(p.get("title") or "", p.get("category"))) in CLOTHING for p in pieces)
 # Colours that sit with anything, so a look is never blocked on an exact match.
 NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
 LOOK_PIECES = 3
-
-
-
-# A colour is a filter, and a filter silently removes things. Asked for a blue
-# birthday outfit for a 10 year old boy, the answer was a shirt, a jacket and a
-# pair of plimsolls: every blue piece we had, and no trousers at all, because
-# the boys' bottoms come in Burgundy, Camel, Navy and Brown. The shopper is not
-# told that, so the look just looks incomplete. Naming the gap - and what would
-# close it - is the difference between a filter and a shop assistant.
-# Accessory earns its place here: asked for a whole burgundy look, the answer
-# was a jumper, trousers and shoes, and the shopper asked where the belt was.
-# We stock one for him; it is simply not burgundy, which is exactly the kind of
-# gap this reports.
-LOOK_ROLES = ("Top", "Bottoms", "Shoes", "Accessory")
-
-
-def _roles_of(pieces: list[dict]) -> set[str]:
-    return {(p.get("role") or _role(p.get("title") or "", p.get("category"))) for p in pieces}
-
-
-def _colour_gaps(before: list[dict], after: list[dict], wanted: str, limit: int = 3) -> dict | None:
-    """What asking for this colour left out, and how to have it anyway."""
-    had, left = _roles_of(before), _roles_of(after)
-    missing = [r for r in LOOK_ROLES if r in had and r not in left]
-    if "Dress" in left:
-        # A dress is a whole outfit; missing tops and bottoms are no gap.
-        missing = [r for r in missing if r not in ("Top", "Bottoms")]
-    if not missing:
-        return None
-
-    instead: dict[str, list[dict]] = {}
-    for role in missing:
-        options = [p for p in before
-                   if (p.get("role") or _role(p["title"], p.get("category"))) == role]
-        options.sort(key=lambda p: p["price_from"] or 0)
-        # product_id travels with the price: without it the market localizer
-        # cannot see these, and a shopper in India was quoted "203.09" next to
-        # "4600 INR" - the shop's base USD, relabelled.
-        instead[role] = [{"product_id": p["product_id"], "title": p["title"],
-                          "handle": p["handle"], "colours": p["colors"],
-                          "price_from": p["price_from"]}
-                         for p in options[:limit]]
-
-    # The colours a whole look could be built in, so the offer is not only
-    # "settle for another colour" but "or have all of it in burgundy".
-    by_colour: dict[str, set[str]] = {}
-    for piece in before:
-        role = piece.get("role") or _role(piece["title"], piece.get("category"))
-        for colour_name in piece["colors"]:
-            if name := (colour_name or "").strip():
-                by_colour.setdefault(name, set()).add(role)
-    whole = sorted(name for name, roles in by_colour.items()
-                   if "Dress" in roles or {"Top", "Bottoms"} <= roles)
-
-
-    # The pieces themselves, to be drawn beside the answer. A recommendation the
-    # shopper cannot see or tap is half a recommendation: the reply named the
-    # Burgundy corduroys and the Camel chinos while the row below showed only
-    # the three blue pieces they were being offered INSTEAD of.
-    show: list[dict] = []
-    for role in missing:
-        for piece in [p for p in before
-                      if (p.get("role") or _role(p["title"], p.get("category"))) == role][:2]:
-            show.append({**piece, "in_wanted_colour": False,
-                         "because": f"no {wanted} {role.lower()} in this size - the nearest"})
-    for piece in before:
-        if whole and any(c.strip().lower() == whole[0].lower() for c in piece["colors"]):
-            if (piece.get("role") or _role(piece["title"], piece.get("category"))) in ("Top", "Bottoms", "Dress"):
-                show.append({**piece, "in_wanted_colour": False,
-                             "because": f"part of a whole look in {whole[0]}"})
-
-    return {"wanted": wanted, "missing": missing, "show": show,
-            "instead_in_other_colours": instead,
-            # Named so it cannot be read as "the look I have just shown you":
-            # the agent answered "or the whole look in blue" and then listed a
-            # green jumper and brown shorts.
-            "a_whole_look_is_possible_in_these_colours": whole}
-
-
-# Colour names this shop puts on girls' pieces. A list, and honestly a list -
-# the pink plimsoll is called "Dusty Raspberry", which is why naming only the
-# obvious words missed it.
-HER_COLOURS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral",
-               "raspberry", "magenta", "cerise", "bubblegum", "candy")
-
-
-def _photo_of(piece: dict, wanted: str, audience: str | None) -> str | None:
-    """The picture to put on the card: their colour, or at least not the other
-    child's. The plimsolls come in blue and in pink, and the shop lists pink."""
-    shots = piece.get("shots") or {}
-    if not shots:
-        return piece.get("image")
-    if wanted:
-        for name, shot in shots.items():
-            if wanted in name:
-                return shot
-    if audience == "Boys":
-        # Which colour the featured photograph actually IS, rather than which
-        # colour the shop happens to list first: the plimsolls list Blue first
-        # and feature the pink pair.
-        featured = (piece.get("image") or "").split("?")[0]
-        shown = next((name for name, shot in shots.items()
-                      if (shot or "").split("?")[0] == featured), "")
-        if not shown:
-            # The store names its files by colour: G9SH0742PNK---PNK-Plimsoll.
-            shown = next((name for name in shots
-                          if name and name.replace(" ", "") in featured.lower().replace("-", "")), "")
-        if shown and any(h in shown for h in HER_COLOURS):
-            for name, shot in shots.items():
-                if not any(h in name for h in HER_COLOURS):
-                    return shot
-    return piece.get("image")
 
 
 def _colour_words(piece: dict) -> set[str]:
@@ -1031,7 +766,7 @@ def _shoe_span(products: list[dict]) -> tuple[float, float] | None:
     """
     numbers = [
         n for p in products
-        if (p.get("role") or _role(p.get("title") or "", p.get("category"))) == "Shoes"
+        if (p.get("role") or _category(p.get("title") or "", None)) == "Shoes"
         for n in _numbers_in([x for x in (p.get("sizes") or [])
                               if not re.search(r"\d\s*[MY]\b", x.strip().upper())
                               and "cm" not in x.lower()])
@@ -1185,7 +920,7 @@ async def complete_the_look(product: str, size: str | None = None,
     size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
     ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
     oldest = max(ages) if ages else None
-    anchor_role = anchor.get("role") or _role(anchor["title"], anchor.get("category"))
+    anchor_role = anchor.get("role") or _category(anchor["title"], None)
     order = COMPANIONS.get(anchor_role, DEFAULT_COMPANIONS)
     # A shoe size is a number and says nothing about age, so ask the
     # conversation before giving up on knowing how old the child is.
@@ -1212,7 +947,7 @@ async def complete_the_look(product: str, size: str | None = None,
                 size = None      # a shoe number is not a size for the clothes
 
     pool = [p for p in stock if p["handle"] != anchor["handle"]
-            and (p.get("role") or _role(p["title"], p.get("category"))) != anchor_role]
+            and (p.get("role") or _category(p["title"], None)) != anchor_role]
     pool = _for_this_child(pool, audience)
     span = _shoe_span(stock)
     season = identity.shopping_season()
@@ -1225,7 +960,7 @@ async def complete_the_look(product: str, size: str | None = None,
 
     picked = []
     for role in order:
-        matches = [p for p in pool if (p.get("role") or _role(p["title"], p.get("category"))) == role]
+        matches = [p for p in pool if (p.get("role") or _category(p["title"], None)) == role]
         if not matches:
             continue
         matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
@@ -1239,15 +974,15 @@ async def complete_the_look(product: str, size: str | None = None,
     # The named companions for this kind of piece may not all be in stock in
     # their size; rather than a look of one, fill up from whatever else suits.
     if len(picked) < max(1, pieces):
-        taken = {p.get("role") or _role(p["title"], p.get("category")) for p in picked}
+        taken = {p.get("role") or _category(p["title"], None) for p in picked}
         rest = [p for p in pool
-                if (p.get("role") or _role(p["title"], p.get("category"))) in order
-                and (p.get("role") or _role(p["title"], p.get("category"))) not in taken]
+                if (p.get("role") or _category(p["title"], None)) in order
+                and (p.get("role") or _category(p["title"], None)) not in taken]
         rest.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
                                  0 if _shares_colour(p, anchor["colors"]) else 1,
                                  p["price_from"] or 0))
         for piece in rest:
-            role = piece.get("role") or _role(piece["title"], piece.get("category"))
+            role = piece.get("role") or _category(piece["title"], None)
             if role in taken:
                 continue
             picked.append(piece)
@@ -1301,19 +1036,6 @@ async def complete_the_look(product: str, size: str | None = None,
         if picked_one["size"]:
             item["size"] = picked_one["size"]
         return item
-
-    # Shoes and a belt are not a look. Where nothing wearable fits this child,
-    # say so instead of dressing the answer up as an outfit.
-    if not _has_clothing([anchor, *picked]):
-        return {
-            "found": False,
-            "reason": "no_clothing_fits",
-            "asked_for": product,
-            "size": size,
-            "for": audience,
-            "only_these_fit": [{"title": p["title"], "handle": p["handle"]} for p in picked][:4],
-            "nothing_else_fits": _range_note(stock, audience, age),
-        }
 
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
     if not picked and (note := _range_note(stock, audience, age)):
@@ -1379,7 +1101,7 @@ async def recommend_from_orders(orders: list[dict], limit: int = 4) -> dict:
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
-                "role": _role(node["title"], node.get("productType")),
+                "role": _category(node["title"], None),
                 "tags": node.get("tags") or [],
                 "price_from": float(min(prices)) if prices else None,
                 "about": _first_sentence(node.get("description")),
@@ -1552,7 +1274,7 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
             left_out.append({"title": product["title"], "reason": "nightwear_not_an_outfit"})
             continue
 
-        role = _role(product["title"], product.get("category"))
+        role = _category(product["title"], None)
         if role in worn:
             left_out.append({"title": product["title"], "kind": role,
                              "reason": "already_have_one", "instead_of": worn[role]})
@@ -1606,20 +1328,6 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
             }
         )
 
-    if chosen and not _has_clothing(
-            [{"title": line.get("title"), "role": _role(line.get("title") or "", None)}
-             for line in chosen]):
-        # Priced fine, but it is shoes and accessories: not an outfit.
-        return {
-            "outfit": chosen,
-            "item_count": len(chosen),
-            "currency": currency,
-            "total": float(total),
-            "problems": problems,
-            "left_out": left_out,
-            "not_an_outfit": "Nothing to wear in this - only shoes or accessories.",
-        }
-
     result: dict = {
         "outfit": chosen,
         "item_count": len(chosen),
@@ -1647,12 +1355,6 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         result["within_budget"] = total <= allowance
         difference = allowance - total
         result["remaining" if difference >= 0 else "over_by"] = float(abs(difference))
-        if difference < 0:
-            # Over budget, the agent used to try again, and again: ten calls to
-            # this tool in one turn, the last of which hit the iteration ceiling
-            # and answered with nothing at all. Work out here what would fit, so
-            # there is something to say on the first call.
-            result["to_fit_the_budget"] = _within(chosen, float(allowance))
 
     # The frontend adds the look to the bag itself, so it just needs the variants.
     result["cart_items"] = [

@@ -157,14 +157,10 @@ def _in_their_colour(item: dict) -> dict:
     """
     wanted = identity.wants_colour()
     variants = item.get("variants")
-    if not isinstance(variants, list) or not variants:
+    if not wanted or not isinstance(variants, list):
         return item
-    match = None
-    if wanted:
-        match = next((v for v in variants
-                      if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
-    if not match:
-        match = _not_for_the_other_child(variants)
+    match = next((v for v in variants
+                  if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
     if not match:
         return item
     return {**item,
@@ -172,26 +168,6 @@ def _in_their_colour(item: dict) -> dict:
             "option": match.get("option") or item.get("option"),
             "image": match.get("image") or item.get("image"),
             "url": match.get("url") or item.get("url")}
-
-
-# Colours the store only puts on girls' pieces. A shopper buying for a boy was
-# shown the Canvas Plimsolls in pink, twice - not because anything was tagged
-# wrong, but because a card takes the product's first variant and pink is the
-# one the shop lists first.
-HERS = ("pink", "rose", "blush", "lilac", "lavender", "fuchsia", "coral",
-        "raspberry", "magenta", "cerise", "bubblegum", "candy")
-
-
-def _not_for_the_other_child(variants: list) -> dict | None:
-    """A variant that suits the child being shopped for, when the first does not."""
-    if identity.shopping_for() != "Boys":
-        return None
-    first = next((v for v in variants if v.get("available")), None)
-    if not first or not any(h in str(first.get("option") or "").lower() for h in HERS):
-        return None
-    return next((v for v in variants
-                 if v.get("available")
-                 and not any(h in str(v.get("option") or "").lower() for h in HERS)), None)
 
 
 def _card(item: dict) -> dict:
@@ -224,14 +200,6 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
     except (TypeError, ValueError):
         return None
     if not isinstance(data, dict) or data.get("error"):
-        return None
-    # "There is no outfit for him, our boys' range stops at 10Y" must not be
-    # drawn above a row of shoes: the picture is the answer a shopper reads, and
-    # two pairs of boots under that sentence is still an answer of two pairs of
-    # boots. The reply names them to explain what does NOT work, so the mention
-    # rule below keeps them - this is the one case where being mentioned is a
-    # reason to leave a product out.
-    if data.get("not_an_outfit") or data.get("has_clothing") is False:
         return None
 
     currency = data.get("currency")

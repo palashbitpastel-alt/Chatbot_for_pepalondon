@@ -52,13 +52,6 @@ BATCH = 100
 _cache: dict[tuple[str, str], tuple[float, dict]] = {}
 
 VARIANT_PRICE_KEYS = ("price", "unit_price")
-# A product's own range, which exists whether or not the card names a variant.
-# product_details returns both a variant_id AND price_from/price_to, and used to
-# fall between the two rules below: the variant rule wanted a "price" it does not
-# carry, and the product rule refused anything holding a variant_id. So its price
-# was never localized, and a shopper in India was quoted 203.09 USD for a dress
-# the same conversation had already priced at 19900 INR.
-PRODUCT_PRICE_KEYS = ("price_from", "price_to")
 
 
 def set_country(code: str | None):
@@ -92,11 +85,9 @@ def _walk(obj, variants: set, products: set) -> None:
         if obj.get("variant_id") and any(obj.get(k) is not None for k in VARIANT_PRICE_KEYS):
             variants.add(str(obj["variant_id"]))
         # A card with no variant of its own - a welcome pick, a saved item - is
-        # priced from its product instead, and so is any card quoting the
-        # product's range.
-        if obj.get("product_id") and (
-                any(obj.get(k) is not None for k in PRODUCT_PRICE_KEYS)
-                or (not obj.get("variant_id") and obj.get("price") is not None)):
+        # priced from its product instead.
+        if obj.get("product_id") and not obj.get("variant_id") and (
+                obj.get("price_from") is not None or obj.get("price") is not None):
             products.add(str(obj["product_id"]))
         for v in obj.values():
             _walk(v, variants, products)
@@ -142,16 +133,14 @@ def _apply(obj, vp: dict, pp: dict, state: dict) -> None:
             if obj.get("line_total") is not None:
                 obj["line_total"] = _money(Decimal(str(amount)) * int(obj.get("quantity") or 1))
         pid = str(obj.get("product_id") or "")
-        if pid in pp:
+        if pid in pp and not obj.get("variant_id"):
             low = pp[pid]["minVariantPricing"]["price"]
             high = pp[pid]["maxVariantPricing"]["price"]
             if obj.get("price_from") is not None:
                 obj["price_from"] = _money(low["amount"])
             if obj.get("price_to") is not None:
                 obj["price_to"] = _money(high["amount"])
-            # "price" on a card that names a variant is THAT variant's price and
-            # has already been set above; the product's cheapest would undercut it.
-            if obj.get("price") is not None and not obj.get("variant_id"):
+            if obj.get("price") is not None:
                 obj["price"] = _money(low["amount"])
             state["currency"] = low["currencyCode"]
         for v in obj.values():

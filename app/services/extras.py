@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from app.services import compare
 from app.services.shopify_client import ShopifyError, graphql
-from app.services.shopify_storefront import _details_from, collection_tree, shop_info
+from app.services.shopify_storefront import collection_tree, shop_info
 
 # ── Product questions ─────────────────────────────────────────────────────
 
@@ -61,15 +61,8 @@ async def product_details(name: str) -> dict:
         "care": care,
         "tags": [t for t in node.get("tags") or [] if t.lower() not in ("all products", "in-stock", "top products")],
         "in_stock_variants": len(in_stock),
-        # What the merchant recorded in the product's own fields - fabric, age
-        # group, sleeve length, care. The question this tool exists for ("is it
-        # machine washable?") is usually answered here rather than in the prose.
-        "details": _details_from(node) or None,
-        "in_collections": [c["title"] for c in ((node.get("collections") or {}).get("nodes") or [])
-                           if c and c.get("title")][:5],
-        "note": "Answer from description, highlights, care and details - details holds the fields the "
-                "merchant filled in, and is often where the answer is. If it is in none of them, say "
-                "the product page does not say, and offer our team.",
+        "note": "Answer only from description, highlights and care. If the answer is not there, say the "
+                "product page does not say, and offer our team.",
     }
 
 
