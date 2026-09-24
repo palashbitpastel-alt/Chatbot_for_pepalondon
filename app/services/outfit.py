@@ -893,8 +893,17 @@ def _photo_of(piece: dict, wanted: str, audience: str | None) -> str | None:
             if wanted in name:
                 return shot
     if audience == "Boys":
-        default = (piece.get("colors") or [""])[0].strip().lower()
-        if any(h in default for h in HER_COLOURS):
+        # Which colour the featured photograph actually IS, rather than which
+        # colour the shop happens to list first: the plimsolls list Blue first
+        # and feature the pink pair.
+        featured = (piece.get("image") or "").split("?")[0]
+        shown = next((name for name, shot in shots.items()
+                      if (shot or "").split("?")[0] == featured), "")
+        if not shown:
+            # The store names its files by colour: G9SH0742PNK---PNK-Plimsoll.
+            shown = next((name for name in shots
+                          if name and name.replace(" ", "") in featured.lower().replace("-", "")), "")
+        if shown and any(h in shown for h in HER_COLOURS):
             for name, shot in shots.items():
                 if not any(h in name for h in HER_COLOURS):
                     return shot
