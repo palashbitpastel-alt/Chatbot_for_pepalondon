@@ -514,6 +514,11 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
        or we do a whole burgundy look, top and bottoms. Which would you rather?"
 
     Ask that one question before pricing anything up.
+    products now carries those alternatives too, each marked in_wanted_colour
+    =false with a "because". They are drawn beside your answer, so NAME the ones
+    you are recommending - the nearest bottoms, and the pieces that make the
+    whole look in the other colour - or they are shown with nothing said about
+    them. Never present a marked piece as being in the colour they asked for.
     colour_matched=false means the same for colour. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age and budget are known, build
     the whole look with build_outfit, using these handles.
