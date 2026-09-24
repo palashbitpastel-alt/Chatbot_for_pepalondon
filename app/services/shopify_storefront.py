@@ -47,6 +47,7 @@ query SupportProductSearch($query: String!, $first: Int!, $variants: Int!) {
       title
       handle
       productType
+      category { name }
       tags
       onlineStoreUrl
       totalInventory
@@ -101,6 +102,7 @@ query SupportOrderStatus($query: String!) {
             legacyResourceId
             handle
             productType
+            category { name }
             tags
             onlineStoreUrl
             featuredMedia { ... on MediaImage { image { url } } }
@@ -118,6 +120,7 @@ query SupportCategoryProducts($query: String!, $first: Int!, $cursor: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       productType
+      category { name }
       tags
       category { id name }
       featuredMedia { ... on MediaImage { image { url } } }
@@ -171,6 +174,7 @@ query SupportOrderHistory($query: String!, $first: Int!) {
             legacyResourceId
             handle
             productType
+            category { name }
             tags
             onlineStoreUrl
             featuredMedia { ... on MediaImage { image { url } } }
@@ -209,6 +213,7 @@ query SupportProductsByIds($ids: [ID!]!, $variants: Int!) {
       title
       handle
       productType
+      category { name }
       tags
       status
       onlineStoreUrl
@@ -332,7 +337,7 @@ def order_line_card(line: dict) -> dict:
         "currency": money.get("currencyCode"),
         "image": variant_image(variant) or product_image(product),
         "url": product_url(product, variant_id) if product.get("handle") else None,
-        "category": product.get("productType") or None,
+        "category": _kind_of(product) or None,
         "tags": product.get("tags") or [],
         "handle": product.get("handle"),
     }
@@ -369,7 +374,7 @@ def _public_product(node: dict, currency: str) -> dict:
     return {
         "product_id": node.get("legacyResourceId"),
         "title": node["title"],
-        "category": node.get("productType") or None,
+        "category": _kind_of(node) or None,
         "url": product_url(node),
         "image": product_image(node),
         "currency": currency,
@@ -564,7 +569,7 @@ async def _grouped_categories() -> list[dict]:
         )["products"]
 
         for node in page["nodes"]:
-            name = (node.get("productType") or "").strip()
+            name = _kind_of(node)
             if not name:
                 continue                    # uncategorised: nothing to draw a tile for
             group = groups.setdefault(name, {"count": 0, "image": None, "taxonomy": {}})
@@ -705,6 +710,8 @@ query SupportProductCollections($cursor: String, $query: String!) {
       title
       handle
       productType
+      category { name }
+      category { name }
       collections(first: 25) { nodes { handle } }
     }
   }
@@ -714,6 +721,20 @@ query SupportProductCollections($cursor: String, $query: String!) {
 TREE_SCAN_PAGES = 10        # 30 products a page, so up to 300 products
 
 _tree_cache: tuple[float, dict] | None = None
+
+
+def _kind_of(node: dict) -> str:
+    """What kind of thing this product is, as the shop itself records it.
+
+    Shopify has two places for this: the product CATEGORY, which is a node of
+    Shopify's own taxonomy and the one the admin now leads with, and the older
+    free-text product TYPE. The category is the better answer where a merchant
+    has set it - it is standard, it is translated, and it does not drift into
+    "Shirt" and "Shirts" and "shirt". Where it is not set, the type is all the
+    shop has said, and saying nothing would be worse.
+    """
+    category = (node.get("category") or {}).get("name")
+    return (category or node.get("productType") or "").strip()
 
 
 async def collection_tree() -> dict:
@@ -746,7 +767,7 @@ async def collection_tree() -> dict:
     for _ in range(TREE_SCAN_PAGES):
         page = (await graphql(PRODUCT_COLLECTIONS, {"cursor": cursor, "query": sellable()}))["products"]
         for node in page["nodes"]:
-            ptype = (node.get("productType") or "").strip()
+            ptype = _kind_of(node)
             pid = str(node.get("legacyResourceId") or "")
             if not pid:
                 continue
@@ -1023,6 +1044,7 @@ query SupportCategoryProductList($query: String!, $first: Int!, $variants: Int!)
       title
       handle
       productType
+      category { name }
       tags
       onlineStoreUrl
       totalInventory
@@ -1054,6 +1076,7 @@ query SupportSizeScan($query: String!, $first: Int!, $cursor: String, $variants:
       title
       handle
       productType
+      category { name }
       tags
       onlineStoreUrl
       totalInventory
