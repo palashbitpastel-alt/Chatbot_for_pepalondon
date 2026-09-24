@@ -63,6 +63,7 @@ query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!, $cursor: S
       tags
       onlineStoreUrl
       description(truncateAt: 240)
+      season: metafield(namespace: "custom", key: "season") { value }
       featuredMedia { ... on MediaImage { image { url altText } } }
       options { name values }
       variants(first: $variants) {
@@ -198,15 +199,48 @@ COOL_PIECES = ("linen", "sleeveless", "short sleeve", "shorts", "sandal", "swim"
                "sun", "romper", "cotton", "broderie", "organza", "voile")
 
 
+# A season the merchant has stated on the product itself, in the custom.season
+# metafield. Read straight from the catalogue, so it beats any guess made from
+# the name: "Cream Boy\'s Belt" reads as neither warm nor cool, and the store
+# says Spring and Summer.
+ALL_YEAR = "all year"
+
+
+def _seasons_of(node: dict) -> list[str]:
+    """The seasons stated on the product, from the store's own metafield.
+
+    A list metafield arrives as a JSON string ('["Autumn","Winter"]'); a plain
+    one arrives as the word itself. Anything unreadable is no statement at all,
+    and the name-based guess takes over.
+    """
+    raw = ((node.get("season") or {}).get("value") or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            listed = json.loads(raw)
+        except ValueError:
+            return []
+        return [str(x) for x in listed if x]
+    return [raw]
+
+
+def _stated_seasons(piece: dict) -> list[str]:
+    return [s for s in (piece.get("seasons") or []) if s]
+
+
 def _suits_season(piece: dict, season: str | None) -> bool:
     """Whether a piece belongs in a look for this season.
 
-    Only the extremes are ruled out: nothing wool-lined in summer, nothing
-    sleeveless as the whole answer in winter. Everything else is left alone,
-    since most childrenswear is worn all year.
+    Where the store has stated the seasons, that is the answer. Otherwise only
+    the extremes are ruled out: nothing wool-lined in summer, nothing sleeveless
+    as the whole answer in winter. Everything else is left alone, since most
+    childrenswear is worn all year.
     """
     if not season:
         return True
+    if stated := _stated_seasons(piece):
+        return any(season.lower() in s.lower() or ALL_YEAR in s.lower() for s in stated)
     words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
     if season == "Summer":
         return not any(w in words for w in WARM_PIECES)
@@ -217,6 +251,11 @@ def _season_first(piece: dict, season: str | None) -> int:
     """0 for a piece the season calls for, 1 for the rest - a sort key."""
     if not season:
         return 1
+    if stated := _stated_seasons(piece):
+        # Named for this season outranks "all year round", which outranks a guess.
+        if any(season.lower() in s.lower() for s in stated):
+            return 0
+        return 1 if any(ALL_YEAR in s.lower() for s in stated) else 2
     words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
     wanted = WARM_PIECES if season in ("Winter", "Autumn") else COOL_PIECES
     return 0 if any(w in words for w in wanted) else 1
@@ -267,6 +306,8 @@ async def browse_catalogue() -> dict:
                 "for": _suits(node.get("tags")),
                 "occasions": occasions.of(node.get("title"), " ".join(node.get("tags") or []),
                                           node.get("description")),
+                # What the merchant says, not what the name suggests.
+                "seasons": _seasons_of(node),
                 "price_from": float(min(prices)) if prices else None,
                 "price_to": float(max(prices)) if prices else None,
                 "in_stock": any(v["availableForSale"] for v in variants),
