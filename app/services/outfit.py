@@ -16,7 +16,7 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation
 
-from app.services import occasions, parts
+from app.services import occasions, parts, suits
 from app.services.shopify_client import ShopifyError, graphql
 from app.services.shopify_storefront import (
     product_image,
@@ -64,6 +64,7 @@ query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!, $cursor: S
       onlineStoreUrl
       description(truncateAt: 240)
       category { fullName }
+      season: metafield(namespace: "custom", key: "season") { value }
       featuredMedia { ... on MediaImage { image { url altText } } }
       options { name values }
       variants(first: $variants) {
@@ -202,12 +203,14 @@ COOL_PIECES = ("linen", "sleeveless", "short sleeve", "shorts", "sandal", "swim"
 def _suits_season(piece: dict, season: str | None) -> bool:
     """Whether a piece belongs in a look for this season.
 
-    Only the extremes are ruled out: nothing wool-lined in summer, nothing
-    sleeveless as the whole answer in winter. Everything else is left alone,
-    since most childrenswear is worn all year.
+    What the merchant stated, else what was read off the piece, else the old
+    word-matching - which only ever ruled out the extremes, since a name is poor
+    evidence and most childrenswear is worn all year.
     """
     if not season:
         return True
+    if (read := suits.suits_season(piece, season)) is not None:
+        return read
     words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
     if season == "Summer":
         return not any(w in words for w in WARM_PIECES)
@@ -218,6 +221,10 @@ def _season_first(piece: dict, season: str | None) -> int:
     """0 for a piece the season calls for, 1 for the rest - a sort key."""
     if not season:
         return 1
+    if seasons := suits.seasons_of(piece):
+        if any(season.lower() in s.lower() for s in seasons):
+            return 0
+        return 1 if any("all year" in s.lower() for s in seasons) else 2
     words = f"{piece.get('title') or ''} {piece.get('category') or ''}".lower()
     wanted = WARM_PIECES if season in ("Winter", "Autumn") else COOL_PIECES
     return 0 if any(w in words for w in wanted) else 1
@@ -262,6 +269,7 @@ async def browse_catalogue() -> dict:
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
                 "taxonomy": (node.get("category") or {}).get("fullName"),
+                "season": ((node.get("season") or {}).get("value") or None),
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
@@ -491,6 +499,20 @@ OUTFIT_PARTS = ("Top", "Bottoms", "Shoes", "Accessory")
 DRESS_PARTS = ("Dress", "Shoes", "Accessory")
 
 
+def _occasion_score(product: dict, occasion: str | None) -> int:
+    """How well this piece suits the occasion. What we read off the piece first;
+    the old word-matching only where nothing has been read."""
+    if suits.occasions_of(product):
+        return suits.score(product, occasion)
+    return occasions.score(product.get("occasions"), occasion)
+
+
+def _is_sleepwear(product: dict) -> bool:
+    if suits.occasions_of(product):
+        return suits.is_sleepwear(product)
+    return occasions.is_sleepwear(product.get("title"))
+
+
 def _role_of(product: dict) -> str:
     """The part this piece plays, read from the shop rather than from a list.
 
@@ -581,11 +603,16 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     pool = [p for p in catalogue["products"] if p["in_stock"]]
     pool = _for_this_child(pool, audience)
     season = identity.shopping_season()
+    # What each piece is FOR, read once and remembered. Only the pieces that
+    # survive the cheap filters are read, so a shop of thousands costs no more
+    # than the shelf a shopper is actually looking at.
+    if occasion or season:
+        await suits.learn(pool)
     pool = [p for p in pool if _suits_season(p, season)]
     if occasion and not occasions.is_sleepwear(occasion):
         pool = [p for p in pool if p["category"] not in _NURSERY_BASICS]
         # Asked for a wedding, shown a nightdress: it is a dress by product type.
-        pool = [p for p in pool if not occasions.is_sleepwear(p["title"])]
+        pool = [p for p in pool if not _is_sleepwear(p)]
     if age is not None:
         pool = [p for p in pool if _fits_age(p["sizes"], age)]
     if budget:
@@ -627,7 +654,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     # Best fit first: the occasion the store's words actually place it at, then
     # a piece tagged for this child over one that merely suits either.
     pool.sort(key=lambda p: (
-        -occasions.score(p.get("occasions"), occasion),
+        -_occasion_score(p, occasion),
         _season_first(p, season),
         0 if audience and audience in p["for"] else 1,
         p["price_from"] or 0,
@@ -666,7 +693,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "category_note": category_note,
         "nothing_else_fits": _range_note(catalogue["products"], audience, age) if not picked else None,
         "occasion_matched": bool(occasion) and any(
-            occasions.score(p.get("occasions"), occasion) >= 2 for p in picked),
+            _occasion_score(p, occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,
         "still_to_ask": still_to_ask,
         "count": len(picked),
@@ -1135,6 +1162,7 @@ async def recommend_from_orders(orders: list[dict], limit: int = 4) -> dict:
                 "title": node["title"],
                 "category": _category(node["title"], node.get("productType")),
                 "taxonomy": (node.get("category") or {}).get("fullName"),
+                "season": ((node.get("season") or {}).get("value") or None),
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
