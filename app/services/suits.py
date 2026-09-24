@@ -125,6 +125,31 @@ def seasons_of(product: dict) -> list[str]:
     return (_known.get(product.get("handle") or "") or {}).get("seasons") or []
 
 
+def _stem(word: str) -> str:
+    """Fold the plural, including the -ies kind: "Parties" and "party" have to
+    meet, or a wedding dress never counts as party wear."""
+    word = word.strip().lower()
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+
+
+def _label(wanted: str) -> str | None:
+    """Their word as one of ours. "wedding" is "Weddings"; plurals cost us a
+    whole shelf of wedding dresses once, because neither string contained the
+    other."""
+    said = {_stem(w) for w in re.findall(r"[a-z]+", (wanted or "").lower())}
+    for name in OCCASIONS:
+        if {_stem(w) for w in name.split()} & said:
+            return name
+    # They said "beach", "school", "festive" - a word for an occasion rather
+    # than its name. The old keyword table is still the floor for reading THEIR
+    # words; what it must no longer do is decide what a product is.
+    from app.services import occasions as words
+
+    return words.named(wanted)
+
+
 def score(product: dict, wanted: str | None) -> int:
     """2 for the occasion asked for, 1 for one that neighbours it, 0 otherwise."""
     if not wanted:
@@ -132,7 +157,7 @@ def score(product: dict, wanted: str | None) -> int:
     have = set(occasions_of(product))
     if not have:
         return 0
-    label = next((o for o in OCCASIONS if o.lower() in wanted.lower()), None) or wanted
+    label = _label(wanted) or wanted
     if label in have:
         return 2
     return 1 if have & set(NEIGHBOURS.get(label, ())) else 0
@@ -143,10 +168,16 @@ def is_sleepwear(product: dict) -> bool:
 
 
 def suits_season(product: dict, season: str | None) -> bool | None:
-    """True/False where we know, None where nobody has said."""
+    """Whether to RULE THIS OUT for the season - and only where the merchant said.
+
+    Ruling a piece out is a strong act: asked what a three year old should wear
+    in winter, reading every piece and keeping only the ones read as winter left
+    one shirt. Our own reading orders the shelf (see seasons_of); it does not
+    empty it. Only the merchant's own season metafield excludes.
+    """
     if not season:
         return True
-    have = seasons_of(product)
-    if not have:
+    stated = _stated_seasons(product)
+    if not stated:
         return None
-    return any(season.lower() in s.lower() or "all year" in s.lower() for s in have)
+    return any(season.lower() in s.lower() or "all year" in s.lower() for s in stated)
