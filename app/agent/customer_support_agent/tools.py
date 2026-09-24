@@ -13,6 +13,8 @@ import json
 import logging
 import re
 
+from contextvars import ContextVar
+
 from langchain_core.tools import tool
 
 from app.core.config import settings
@@ -581,6 +583,12 @@ async def browse_catalogue() -> str:
         return _fail("browse_catalogue", exc)
 
 
+# How many looks one turn may price. A ContextVar, so it counts per request and
+# never leaks between shoppers.
+_builds: ContextVar[int] = ContextVar("build_outfit_calls", default=0)
+MAX_BUILDS = 2
+
+
 @tool
 async def build_outfit(items: str | list, budget: float = 0) -> str:
     """Price a look exactly and get its variant ids. Never add prices up yourself.
@@ -604,6 +612,19 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     not_an_outfit comes back when what you sent holds nothing to wear: say so
     rather than calling shoes and a belt a look.
     """
+    # Telling it not to retry was not enough: a look over budget still drew ten
+    # calls in one turn, and the tenth ran the agent out of turns so the shopper
+    # got an empty reply. After the second, the tool stops answering and says so.
+    built = _builds.get() + 1
+    _builds.set(built)
+    if built > MAX_BUILDS:
+        return json.dumps({
+            "error": "already_built",
+            "built_this_turn": built - 1,
+            "tell_the_shopper": ("Answer now from the look you already have. If it was over "
+                                 "budget, use its to_fit_the_budget: what to keep, what to "
+                                 "leave out, and what it then costs."),
+        }, ensure_ascii=False)
     try:
         result = await outfit.build_outfit(items, budget or None)
         if result.get("outfit"):
