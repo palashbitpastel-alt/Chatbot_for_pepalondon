@@ -18,7 +18,11 @@ _NUMBER_WORDS = {
 _NUM = r"(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")"
 
 # "my 5-year-old", "5 years old", "age 6", "she is six", "18 months"
-_AGE_YEARS = re.compile(rf"\b{_NUM}[\s-]*(?:years?|yrs?|yo|y/o)(?:[\s-]*old)?\b", re.I)
+# "years", "yrs", "yo" - and the way people actually type it in a hurry:
+# "10yaers old", "5 yeras". Letters of the right word in the wrong order still
+# name an age, and the panel keeping a stale one is worse than a loose match.
+_AGE_YEARS = re.compile(
+    rf"\b{_NUM}[\s-]*(?:y[ae]{{1,2}}rs?a?s?|yrs?|yo|y/o)(?:[\s-]*old)?\b", re.I)
 # "she is 6", "my daughter is 6", "the little one is 6", "turning 7"
 _AGE_PLAIN = re.compile(
     rf"\b(?:aged?|turning|(?:she|he|they|daughter|son|girl|boy|baby|child|kid|one)"
