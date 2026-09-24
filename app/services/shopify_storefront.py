@@ -572,7 +572,13 @@ async def _grouped_categories() -> list[dict]:
             name = _kind_of(node)
             if not name:
                 continue                    # uncategorised: nothing to draw a tile for
-            group = groups.setdefault(name, {"count": 0, "image": None, "taxonomy": {}})
+            # "Shirt" from one product's type and "Shirts" from another's
+            # category are one shelf, not two. Group on the folded name and show
+            # whichever spelling the shop uses most.
+            key = _same_shelf(name)
+            group = groups.setdefault(
+                key, {"count": 0, "image": None, "taxonomy": {}, "names": {}})
+            group["names"][name] = group["names"].get(name, 0) + 1
             group["count"] += 1
             if group["image"] is None:
                 image = (node.get("featuredMedia") or {}).get("image") or {}
@@ -587,6 +593,9 @@ async def _grouped_categories() -> list[dict]:
             break
         cursor = page["pageInfo"]["endCursor"]
 
+    # Back to the shop's own spelling, the commonest one winning.
+    groups = {max(g["names"].items(), key=lambda kv: kv[1])[0] if g.get("names") else key: g
+              for key, g in groups.items()}
     ranked = sorted(groups.items(), key=lambda kv: (-kv[1]["count"], kv[0]))
 
     out = []
@@ -721,6 +730,21 @@ query SupportProductCollections($cursor: String, $query: String!) {
 TREE_SCAN_PAGES = 10        # 30 products a page, so up to 300 products
 
 _tree_cache: tuple[float, dict] | None = None
+
+
+def _same_shelf(name: str) -> str:
+    """Two spellings of one kind, folded: "Shirt"/"Shirts", "Hat"/"Hats"."""
+    word = " ".join((name or "").lower().split())
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    # "Dresses" -> "dress". The -es plural, but only after a hiss: "blouses" is
+    # a plain -s plural and must not lose its e.
+    if len(word) > 4 and word.endswith("es") and word[:-2].endswith(("ss", "x", "z", "ch", "sh")):
+        return word[:-2]
+    # "Dress" is already singular; only a single trailing s is a plural.
+    if word.endswith("ss"):
+        return word
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
 
 
 def _kind_of(node: dict) -> str:
