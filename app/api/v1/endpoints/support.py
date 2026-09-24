@@ -168,6 +168,38 @@ async def _names_a_kind(message: str) -> bool:
     return bool(kinds & words)
 
 
+_BUDGET_FIELD = re.compile(r"^(Under|Around)\s*(\D{0,4}?)\s*([\d,.]+)$")
+
+
+async def _budget_in_their_money(understood: dict, showing: str | None) -> None:
+    """Rewrite the Understood panel's budget into the money this shop is quoting.
+
+    A shopper who typed "around £400" was shown "Around £400" beside rupee
+    prices for the rest of the conversation. Keeping their sign was deliberate -
+    turning £400 into ₹400 once made a budget a hundredth of what they meant -
+    but now the shop can say what £400 is worth here, so the panel says it too.
+    """
+    field = next((f for f in understood.get("fields") or [] if f["key"] == "budget"), None)
+    ours = needs.symbol(showing)
+    if not field or not ours:
+        return
+    m = _BUDGET_FIELD.match(str(field.get("value") or "").strip())
+    if not m or not m.group(2) or m.group(2).strip() == ours.strip():
+        return
+    try:
+        catalogue = await outfit.browse_catalogue()
+        ids = [p["product_id"] for p in (catalogue.get("products") or [])
+               if p.get("product_id") and p.get("price_from")][:9]
+        converted = await market.in_our_money(
+            float(m.group(3).replace(",", "")), m.group(2).strip(), ids)
+    except (ShopifyError, KeyError, ValueError):
+        return
+    if converted:
+        field["value"] = f"{m.group(1)} {ours}{converted['our_budget']:,.0f}"
+        # What they typed, kept for the agent's own reading.
+        field["as_they_said_it"] = m.group(0)
+
+
 def _welcome_handles() -> list[str]:
     """The collections the merchant pinned to the welcome screen, in their order."""
     return [h.strip() for h in settings.SUPPORT_WELCOME_COLLECTIONS.split(",") if h.strip()]
@@ -612,6 +644,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
             identity.set_season(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "season"), None))
+            await _budget_in_their_money(
+                understood, req.context.currency if req.context else None)
             if understood["fields"]:
                 yield _sse("understood", understood)
 
