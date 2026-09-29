@@ -27,7 +27,6 @@ from app.agent.customer_support_agent.shopper_context import (
     describe,
     with_context,
 )
-from app.api.v1 import cart_actions
 from app.api.v1.cards import CardCollector, cards_from, _card
 from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import size_finder, store_profile, suggestions
@@ -565,16 +564,13 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                  budget, within_budget,           the exact total and the variants to
                  cart_items[]}                    add to the bag
       action  - {type: "add_to_cart", items[]}   the agent's own add or redirect, with
-                | {type: "redirect", page, url}  exact variant ids; one per call it made
-      actions - {"action"}                       what the shopper asked of their bag:
-                                                 "add previous products in cart",
-                                                 "checkout" (with the products shown),
-                                                 or "checkout from existing" (only
-                                                 what is already in the bag)
+                | {type: "redirect", page, url}  exact variant ids; one per call it made.
+                | {type: "confirm_add", items[]} Nothing is added: a checklist of these
+                                                 lines for the shopper to keep or change
       done    - {"session_id", "reply",          the finished reply, repeating
                  products?, outfit?,             whatever cards were produced, the
-                 greeting?, collections?,        `action` list and the `actions`
-                 actions?, cart_action?}         word
+                 greeting?, collections?,        `action` list
+                 actions?}
       error   - {"message"}                      the turn failed; nothing was saved
       understood - {fields[], age}               what the shopper has asked for so far
                                                  (age, occasion, budget, size...), for the
@@ -719,7 +715,6 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
 
         reply = ""
         cards = CardCollector()
-        called: set[str] = set()
         token = identity.set_current(shopper)
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
@@ -741,7 +736,6 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 elif event["type"] == "tool":
                     yield _sse("tool", {"name": event["name"], "phase": event["phase"]})
                     if event["phase"] == "end":
-                        called.add(event["name"])
                         # Collected now, sent once the reply exists - see finalise().
                         cards.take(event["name"], event.get("output"))
                 elif event["type"] == "final":
@@ -778,20 +772,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # the last event - carry each out once, from one place or the other.
         for action in cards.actions:
             yield _sse("action", action)
-        # The plainer signal: add what the widget showed, check out with it, or
-        # check out with only what is in the bag - which, empty, goes nowhere.
-        cart_action = cart_actions.cart_action(req.message, cards.actions)
-        if (cart_action == cart_actions.CHECKOUT_FROM_EXISTING
-                and req.cart is not None and not req.cart.items):
-            cart_action = None
-        # The agent tried add_to_cart and it put nothing in - sold out, no such
-        # size, a size still to choose. The net must not then add the card's
-        # default variant: asked for Red 5/6Y, sold out, a shopper got 0-3M.
-        if (cart_action == cart_actions.ADD_PREVIOUS and "add_to_cart" in called
-                and not any(a.get("type") == "add_to_cart" for a in cards.actions)):
-            cart_action = None
-        if cart_action:
-            yield _sse("actions", {"action": cart_action})
+        # Only the agent's own actions touch the bag. The keyword net that used to
+        # sit here ("add it" -> add every card shown, in its default size) acted
+        # on words the agent had already judged, and put wrong sizes in bags.
 
         try:
             chips = await suggestions.for_turn(
@@ -810,8 +793,6 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             done_payload["cart"] = cart_payload
         if cards.actions:
             done_payload["actions"] = cards.actions
-        if cart_action:
-            done_payload["cart_action"] = cart_action
         yield _sse("done", done_payload)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)

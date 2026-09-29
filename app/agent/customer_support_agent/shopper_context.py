@@ -59,6 +59,18 @@ class Customer(BaseModel):
     signature: str | None = None
 
 
+class OnScreenItem(BaseModel):
+    """One row of the look or checklist open in the chat, as the shopper left it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    variant_id: str | None = None
+    title: str | None = Field(default=None, max_length=300)
+    option: str | None = Field(default=None, max_length=200)
+    quantity: int = Field(default=1, ge=1, le=20)
+    ticked: bool = True
+
+
 class PageContext(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -69,6 +81,9 @@ class PageContext(BaseModel):
     template: str | None = None
     viewing_product: str | None = None
     page_url: str | None = None
+    # The newest look or checklist in the chat, with their own ticks and options -
+    # so "keep it" or "add them" means what is on their screen now.
+    on_screen: list[OnScreenItem] | None = Field(default=None, max_length=20)
 
 
 def _money(minor: int | None, currency: str | None) -> str | None:
@@ -100,6 +115,14 @@ def describe(
         if shown_in:
             place = f" in {context.country}" if context.country else ""
             lines.append(f"Prices are shown to them in {shown_in}{place}")
+
+    if context and context.on_screen:
+        lines.append("On screen in the chat, as they left it (their ticks and options count):")
+        for item in context.on_screen:
+            mark = "ticked" if item.ticked else "UNticked"
+            option = f" ({item.option})" if item.option else ""
+            lines.append(f"  - [{mark}] {item.title or 'item'}{option} x{item.quantity}"
+                         f" variant_id={item.variant_id}")
 
     if customer and customer.logged_in:
         who = customer.first_name or "a signed-in shopper"

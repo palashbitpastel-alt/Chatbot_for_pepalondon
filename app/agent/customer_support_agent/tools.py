@@ -63,9 +63,21 @@ async def check_order_status(order_number: str, email: str) -> str:
 
 
 @tool
-async def add_to_cart(items: list[dict], they_asked: str) -> str:
+async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = False) -> str:
     """Put products in the shopper's bag. The storefront does the adding; this
     finds the exact variant and tells it which.
+
+    confirm_first: your judgement, not a rule. Set it true when any colour or size
+      in this add was not chosen by the shopper themselves - a look you sized from
+      their child's age, defaults a tool picked, several pieces at once. Nothing
+      goes in: the storefront shows them a checklist of exactly these pieces with
+      their options, where they can untick, change colour or size per piece, and
+      tap "Add all as shown". Say in one line what you have lined up and ask whether
+      to keep it or change anything. Leave it false when they named every option
+      themselves ("add the red one in 4/6Y") - asking again only slows them down.
+      When they then say "keep it" / "add them" / "yes", add what is ON SCREEN as
+      the storefront context lists it - their ticked rows, by variant_id, with the
+      options they changed - and confirm_first false.
 
     items: [{"product": "<name or handle>", "color": "Pink", "size": "5Y", "quantity": 1}]
       "this"/"it" is the product they are viewing. For variants a tool already
@@ -106,8 +118,9 @@ async def add_to_cart(items: list[dict], they_asked: str) -> str:
     # size goes in only if the shopper named it. Asked for Red 5/6Y, which Red does
     # not come in, the agent twice bagged a size of its own choosing (0-3M, 4/6Y).
     # A size they never gave is dropped, so the tool asks them instead.
+    # A checklist the shopper confirms is their choice, so it skips this.
     unchosen = []
-    for item in items:
+    for item in items if not confirm_first else []:
         if isinstance(item, dict) and not item.get("variant_id") and item.get("size") \
                 and not _size_they_named(str(item["size"])):
             unchosen.append(item.pop("size"))
@@ -115,6 +128,13 @@ async def add_to_cart(items: list[dict], they_asked: str) -> str:
         result = await outfit.cart_additions(items)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("add_to_cart", exc)
+    if confirm_first and result.get("lines"):
+        # Nothing is added: the storefront draws these for them to confirm or change.
+        result.pop("action", None)
+        result["done"] = False
+        result["awaiting_confirmation"] = True
+        result["action"] = {"type": "confirm_add", "currency": result.get("currency"),
+                            "items": result["lines"]}
     if unchosen:
         result["size_not_chosen_by_shopper"] = {
             "dropped": unchosen,
