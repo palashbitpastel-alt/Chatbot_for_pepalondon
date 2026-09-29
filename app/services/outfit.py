@@ -1268,6 +1268,15 @@ def _match_variant(product: dict, want_colour: str | None, want_size: str | None
         return True
 
     candidates = [v for v in product["variants"]["nodes"] if matches(v)]
+    if not candidates and want_size:
+        # The shop's own size names are long: "28" is "10UK/11US/28EU", "5Y" is
+        # "5/6Y". Taken only when exactly one size answers to it.
+        from app.services.extras import _size_matches
+        loose = [v for v in product["variants"]["nodes"]
+                 if (not want_colour or (_colour_of(v) or "").casefold() == want_colour.casefold())
+                 and _size_matches(want_size, [_option_value(v, "Size") or ""])]
+        if len({_option_value(v, "Size") for v in loose}) == 1:
+            candidates = loose
     if not candidates:
         return None
     return next((v for v in candidates if v["availableForSale"]), candidates[0])

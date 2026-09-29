@@ -117,9 +117,11 @@ def describe(
             lines.append(f"Prices are shown to them in {shown_in}{place}")
 
     if context and context.on_screen:
-        lines.append("On screen in the chat, as they left it (their ticks and options count):")
+        lines.append("On screen in the chat, as they left it - their ticks and options are their "
+                     "choice. Adding \"them\" means the ticked rows only; an unticked row is one "
+                     "they took out, so never add it unless they ask for it again:")
         for item in context.on_screen:
-            mark = "ticked" if item.ticked else "UNticked"
+            mark = "ticked" if item.ticked else "UNTICKED - they removed it"
             option = f" ({item.option})" if item.option else ""
             lines.append(f"  - [{mark}] {item.title or 'item'}{option} x{item.quantity}"
                          f" variant_id={item.variant_id}")
