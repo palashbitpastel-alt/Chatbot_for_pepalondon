@@ -254,16 +254,25 @@ async def edit_cart_item(product: str = "", size: str = "", color: str = "", qua
 
 
 @tool
-async def product_details(product: str) -> str:
+async def product_details(product: str, colour: str = "", size: str = "") -> str:
     """Everything the store says about ONE product: full description, fabric, care,
-    colours, sizes, made in. Use for any question about a product itself - "is it
-    machine washable?", "what is it made of?", "does it have pockets?", "is it
-    lined?". product: its name as they said it ("this" = the one they are viewing).
+    colours, sizes, made in, and which colour/size combinations are in stock. Use for
+    any question about a product itself - "is it machine washable?", "what is it made
+    of?", "do you have it in red 5/6Y?". product: its name as they said it ("this" =
+    the one they are viewing). colour / size: pass whatever the shopper named, exactly
+    as they said it, whenever they name or pick one ("select red and 5/6Y").
     Answer only from what it returns; if it is not there, say the product page does
     not say and offer our team. Never guess a care instruction or a fabric.
+
+    Stock: `requested` is the verdict on their colour and size - relay its
+    tell_customer. available=false means SOLD OUT: say so first, then offer
+    in_stock_sizes_in_this_colour or same_size_in_other_colours. Never call a
+    combination available, or quote its price, unless requested.available is true or
+    it is listed in stock_by_colour[colour].in_stock.
     """
     try:
-        return json.dumps(await extras.product_details(product), ensure_ascii=False)
+        return json.dumps(await extras.product_details(product, colour=colour, size=size),
+                          ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("product_details", exc)
 

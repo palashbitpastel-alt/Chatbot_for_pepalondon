@@ -719,6 +719,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
 
         reply = ""
         cards = CardCollector()
+        called: set[str] = set()
         token = identity.set_current(shopper)
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
@@ -740,6 +741,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 elif event["type"] == "tool":
                     yield _sse("tool", {"name": event["name"], "phase": event["phase"]})
                     if event["phase"] == "end":
+                        called.add(event["name"])
                         # Collected now, sent once the reply exists - see finalise().
                         cards.take(event["name"], event.get("output"))
                 elif event["type"] == "final":
@@ -781,6 +783,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         cart_action = cart_actions.cart_action(req.message, cards.actions)
         if (cart_action == cart_actions.CHECKOUT_FROM_EXISTING
                 and req.cart is not None and not req.cart.items):
+            cart_action = None
+        # The agent tried add_to_cart and it put nothing in - sold out, no such
+        # size, a size still to choose. The net must not then add the card's
+        # default variant: asked for Red 5/6Y, sold out, a shopper got 0-3M.
+        if (cart_action == cart_actions.ADD_PREVIOUS and "add_to_cart" in called
+                and not any(a.get("type") == "add_to_cart" for a in cards.actions)):
             cart_action = None
         if cart_action:
             yield _sse("actions", {"action": cart_action})
