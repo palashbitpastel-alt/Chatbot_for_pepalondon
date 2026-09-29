@@ -594,6 +594,9 @@ async def complete_the_look(product: str, size: str = "", budget: float = 0) -> 
     For "what goes with this", "complete the look", "style this dress", or a
     shopper looking at a piece who wants the whole outfit. product: the piece
     they named or are viewing. size / budget: only if they said one.
+    NOT for changing one piece of an outfit they are already putting together
+    ("I don't like the plimsolls' colour", "swap the belt"): this builds a new
+    look and would throw theirs away. Change just that piece instead.
     Returns the look already priced, with its total and the exact variants; the
     storefront draws it with a tick per piece and an add-the-look button. Say in
     one line what you have put together and the total, nothing more.
