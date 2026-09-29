@@ -35,6 +35,9 @@ CARD_TOOLS = {
     "request_order_change": "choices",
 }
 MAX_CARDS = 12
+# Category tiles are the whole answer to "what categories do you have", so
+# every one is drawn - the reply names them all and each must be tappable.
+MAX_CATEGORY_TILES = 60
 
 # Tools whose product list IS the answer, not a shortlist the agent then talks
 # about. A category browse is the shopper's own request drawn back at them, so
@@ -341,7 +344,7 @@ class CardCollector:
             except (TypeError, ValueError, AttributeError):
                 listed = []
             if listed:
-                self.categories = {"categories": listed[:MAX_CARDS]}
+                self.categories = {"categories": listed[:MAX_CATEGORY_TILES]}
             return None
         if tool_name == "browse_category" and output:
             try:
@@ -352,7 +355,7 @@ class CardCollector:
             if not found.get("found"):
                 offered = [c for c in (found.get("categories") or []) if c.get("name")]
                 if offered:
-                    self.categories = {"categories": offered[:MAX_CARDS]}
+                    self.categories = {"categories": offered[:MAX_CATEGORY_TILES]}
         cards = cards_from(tool_name, output)
         if cards is None:
             return None
