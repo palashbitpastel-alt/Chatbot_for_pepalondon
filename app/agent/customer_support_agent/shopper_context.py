@@ -69,6 +69,8 @@ class OnScreenItem(BaseModel):
     option: str | None = Field(default=None, max_length=200)
     quantity: int = Field(default=1, ge=1, le=20)
     ticked: bool = True
+    # "assistant" until the shopper changes the piece's colour or size themselves.
+    chosen_by: str | None = Field(default=None, max_length=20)
 
 
 class PageContext(BaseModel):
@@ -84,6 +86,8 @@ class PageContext(BaseModel):
     # The newest look or checklist in the chat, with their own ticks and options -
     # so "keep it" or "add them" means what is on their screen now.
     on_screen: list[OnScreenItem] | None = Field(default=None, max_length=20)
+    # "look" (a look you built) or "checklist" (lined up, waiting for their OK).
+    on_screen_kind: str | None = Field(default=None, max_length=20)
 
 
 def _money(minor: int | None, currency: str | None) -> str | None:
@@ -117,14 +121,18 @@ def describe(
             lines.append(f"Prices are shown to them in {shown_in}{place}")
 
     if context and context.on_screen:
-        lines.append("On screen in the chat, as they left it - their ticks and options are their "
-                     "choice. Adding \"them\" means the ticked rows only; an unticked row is one "
-                     "they took out, so never add it unless they ask for it again:")
+        kind = {"look": "a look you built", "checklist": "your checklist, waiting for their OK"}.get(
+            context.on_screen_kind or "", "pieces")
+        lines.append(f"On screen in the chat: {kind}, as they left it. Ticks are their choice - adding "
+                     "\"them\" means the ticked rows only; an unticked row is one they took out, so "
+                     "never add it unless they ask for it again:")
         for item in context.on_screen:
             mark = "ticked" if item.ticked else "UNTICKED - they removed it"
             option = f" ({item.option})" if item.option else ""
+            who = {"assistant": ", options picked by you", "shopper": ", options picked by them"}.get(
+                item.chosen_by or "", "")
             lines.append(f"  - [{mark}] {item.title or 'item'}{option} x{item.quantity}"
-                         f" variant_id={item.variant_id}")
+                         f" variant_id={item.variant_id}{who}")
 
     if customer and customer.logged_in:
         who = customer.first_name or "a signed-in shopper"
