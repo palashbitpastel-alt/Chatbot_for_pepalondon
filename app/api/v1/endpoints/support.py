@@ -537,6 +537,32 @@ async def support_history(session_id: str = Query(..., min_length=10, max_length
     }
 
 
+def _finishing_an_add(history: list[tuple[str, str]], message: str) -> str | None:
+    """A note for the agent when this message answers "which size?" on an add.
+
+    "add to cart" -> "Red has no 5/6Y, which would you like?" -> "ok select that
+    4/6y". The agent read the last one alone - "select" is only looking - and
+    showed the tights instead of bagging them. The shopper already asked; the size
+    finishes that request, so the agent is told so outright.
+    """
+    if not message.strip() or cart_actions.cart_action(message) is not None:
+        return None
+    last_user = next((i for i in range(len(history) - 1, -1, -1) if history[i][0] == "user"), None)
+    if last_user is None:
+        return None
+    asked = history[last_user][1]
+    reply = next((c for r, c in history[last_user + 1:] if r == "assistant"), "")
+    if cart_actions.cart_action(asked) != cart_actions.ADD_PREVIOUS or "?" not in reply:
+        return None
+    picked = [f for f in needs.understood([message])["fields"] if f["key"] in ("size", "colour")]
+    if not picked:
+        return None
+    return (f"[Pending add: their previous message asked to add to the bag ({asked!r}) and you "
+            f"asked which option. This message is their answer. Call add_to_cart now with the "
+            f"product under discussion and the option they just gave, they_asked={asked!r}. "
+            f"If that option is sold out or does not exist, say so and ask again - never add another.]")
+
+
 @router.post("/support/chat")
 async def support_chat(req: SupportChatRequest) -> StreamingResponse:
     """Chat with the customer support agent. Replies stream back as SSE.
@@ -620,6 +646,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                                       req.cart.currency)
         if line := multi_buy.headline(bag_offer):
             briefing = f"{briefing}\nMulti-item offer on their bag: {line}"
+
+    if pending := _finishing_an_add(history, req.message):
+        briefing = f"{briefing}\n{pending}" if briefing else pending
 
     async def events() -> AsyncIterator[str]:
         # Every price in this stream - the welcome tiles as much as the agent's
