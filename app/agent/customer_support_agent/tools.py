@@ -570,8 +570,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     category_note means we sell that kind but none suits this child - say exactly
     that ("our coats are girls' only at the moment") and never "we have no coats".
     colour_matched=false means the same for colour. still_to_ask lists what is
-    missing - ask for the FIRST one only. Once age and budget are known, build
-    the whole look with build_outfit, using these handles.
+    missing - ask for the FIRST one only. Once age is known, build the whole look
+    with build_outfit, using these handles - a budget is optional, never a reason
+    to wait (budget_optional=true: build it, then say they can give one to adjust).
     """
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,

@@ -689,7 +689,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         if not picked:
             picked = pool[:max(1, limit)]
 
-    still_to_ask = [name for name, have in (("age", age), ("budget", budget)) if not have]
+    # Age decides the sizes, so a look waits for it. A budget only narrows the
+    # choice: without one the look is built anyway and they can give one after.
+    still_to_ask = [] if age else ["age"]
     return {
         "currency": catalogue["currency"],
         "known": {"for": audience, "colour": colour or None, "occasion": occasion or None,
@@ -700,6 +702,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
             _occasion_score(p, occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,
         "still_to_ask": still_to_ask,
+        "budget_optional": not budget,
         "count": len(picked),
         "products": [
             {
