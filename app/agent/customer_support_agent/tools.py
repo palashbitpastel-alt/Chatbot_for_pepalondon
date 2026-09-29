@@ -103,16 +103,17 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
     if not identity.they_said(they_asked):
         # Told "choose size 12y", the agent put a top in a shopper's bag. It may
         # read intent however it likes - it just has to be able to point at the
-        # words, and they have to be words the shopper really wrote.
+        # words, and they have to be words the shopper really wrote. It is shown
+        # what they did write, so a misquote is put right instead of making the
+        # shopper repeat themselves.
         return json.dumps({
             "done": False,
-            "refused": "nobody_asked_for_this",
-            "why": ("they_asked must quote the shopper's own words asking for this, "
-                    f"and {they_asked!r} is not among the things they said."),
-            "tell_the_shopper": ("Show the piece and let them decide. If they meant to buy "
-                                 "it, they will say so - then you can quote them."),
-            "do_not_retry": ("Calling this again will be refused the same way. Answer them "
-                             "now, without adding."),
+            "refused": "not_their_words",
+            "why": f"they_asked must be copied exactly from what the shopper wrote; {they_asked!r} is not.",
+            "what_they_wrote": list(identity.said_messages())[-4:],
+            "next": ("If one of these asks to add it, call again with they_asked copied from it "
+                     "exactly. If none does, show the piece and let them decide - do not ask "
+                     "them to type a phrase for you."),
         })
     # The same rule for the size: the agent may judge which piece they mean, but a
     # size goes in only if the shopper named it. Asked for Red 5/6Y, which Red does
