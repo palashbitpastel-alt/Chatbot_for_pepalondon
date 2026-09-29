@@ -446,6 +446,10 @@ async def cart_additions(items: list[dict]) -> dict:
                 "missing": missing,
                 "available_colors": colours,
                 "available_sizes": sizes,
+                # Enough for a checklist row the shopper can finish choosing on.
+                "url": product_url(product) if product.get("handle") else None,
+                "image": product_image(product),
+                "product_id": product.get("legacyResourceId"),
             })
             continue
 

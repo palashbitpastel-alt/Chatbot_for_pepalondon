@@ -73,7 +73,9 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
       goes in: the storefront shows them a checklist of exactly these pieces with
       their options, where they can untick, change colour or size per piece, and
       tap "Add all as shown". Say in one line what you have lined up and ask whether
-      to keep it or change anything. Leave it false when they named every option
+      to keep it or change anything. A piece whose size or colour is still needed is
+      on the checklist too (on_the_checklist_to_choose) with its choices open - say
+      they can pick it there, rather than asking for it in a separate question. Leave it false when they named every option
       themselves ("add the red one in 4/6Y") - asking again only slows them down.
       When they then say "keep it" / "add them" / "yes", add what is ON SCREEN as
       the storefront context lists it - their ticked rows, by variant_id, with the
@@ -129,13 +131,21 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
         result = await outfit.cart_additions(items)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("add_to_cart", exc)
-    if confirm_first and result.get("lines"):
+    # A piece still missing a size or colour joins the checklist too, with its
+    # choices open, so they finish everything in one place.
+    open_rows = [{"title": n["title"], "url": n["url"], "image": n.get("image"),
+                  "product_id": n.get("product_id"), "variant_id": None, "option": None,
+                  "quantity": 1, "unit_price": None, "needs": n["missing"]}
+                 for n in result.get("needs_choice") or [] if n.get("url")]
+    if confirm_first and (result.get("lines") or open_rows):
         # Nothing is added: the storefront draws these for them to confirm or change.
         result.pop("action", None)
         result["done"] = False
         result["awaiting_confirmation"] = True
+        if open_rows:
+            result["on_the_checklist_to_choose"] = [r["title"] for r in open_rows]
         result["action"] = {"type": "confirm_add", "currency": result.get("currency"),
-                            "items": result["lines"]}
+                            "items": result.get("lines", []) + open_rows}
     if unchosen:
         result["size_not_chosen_by_shopper"] = {
             "dropped": unchosen,
