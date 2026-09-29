@@ -71,6 +71,11 @@ def _size_matches(asked: str, sizes: list[str]) -> list[str]:
         return exact
     nums = _NUM_RE.findall(want)
     unit = want[-1] if want and want[-1] in "ym" else ""
+    if len(nums) > 1 and not unit:
+        # One shoe size, spelt two ways across colours: "9UK/10US/27EU" in navy is
+        # plain "27" in cream. A bare-number size matching one of its numbers.
+        return [s for s in sizes
+                if len(found := _NUM_RE.findall(_fold_size(s))) == 1 and found[0] in nums]
     if len(nums) != 1:
         return []
     return [s for s in sizes
