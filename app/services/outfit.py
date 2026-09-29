@@ -705,7 +705,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "budget_optional": not budget,
         "next": ("Nothing is missing: call build_outfit now with one piece per part of the look "
                  "(top or dress, bottoms if needed, shoes, an accessory) from these handles, and "
-                 "show the finished look. Do not ask whether to put it together.")
+                 "show the finished look. Do not ask whether to put it together. A part missing "
+                 "here (e.g. no top in their colour): take it from browse_catalogue - a whole "
+                 "outfit, never a smaller one.")
                 if not still_to_ask and not wanted_category else None,
         "count": len(picked),
         "products": [
