@@ -67,9 +67,9 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
     """Put products in the shopper's bag. The storefront does the adding; this
     finds the exact variant and tells it which.
 
-    confirm_first: your judgement, not a rule. Set it true when any colour or size
-      in this add was not chosen by the shopper themselves - a look you sized from
-      their child's age, defaults a tool picked, several pieces at once. Nothing
+    confirm_first: true whenever any colour or size in this add was picked by you or
+      a tool rather than by the shopper - a look you built or sized from their child's
+      age, rows on screen marked "options picked by you" - even when they said yes to it. Nothing
       goes in: the storefront shows them a checklist of exactly these pieces with
       their options, where they can untick, change colour or size per piece, and
       tap "Add all as shown". Say in one line what you have lined up and ask whether
