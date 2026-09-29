@@ -137,6 +137,11 @@ def they_said(words: str) -> bool:
     return any(want in " ".join(said.lower().split()) for said in _said.get())
 
 
+def said_messages() -> tuple:
+    """The shopper's own recent messages, oldest first."""
+    return _said.get()
+
+
 _cart: ContextVar[object | None] = ContextVar("current_cart", default=None)
 
 

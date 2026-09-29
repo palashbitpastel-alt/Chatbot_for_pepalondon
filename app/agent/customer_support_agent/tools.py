@@ -102,10 +102,39 @@ async def add_to_cart(items: list[dict], they_asked: str) -> str:
             "do_not_retry": ("Calling this again will be refused the same way. Answer them "
                              "now, without adding."),
         })
+    # The same rule for the size: the agent may judge which piece they mean, but a
+    # size goes in only if the shopper named it. Asked for Red 5/6Y, which Red does
+    # not come in, the agent twice bagged a size of its own choosing (0-3M, 4/6Y).
+    # A size they never gave is dropped, so the tool asks them instead.
+    unchosen = []
+    for item in items:
+        if isinstance(item, dict) and not item.get("variant_id") and item.get("size") \
+                and not _size_they_named(str(item["size"])):
+            unchosen.append(item.pop("size"))
     try:
-        return json.dumps(await outfit.cart_additions(items), ensure_ascii=False)
+        result = await outfit.cart_additions(items)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("add_to_cart", exc)
+    if unchosen:
+        result["size_not_chosen_by_shopper"] = {
+            "dropped": unchosen,
+            "why": "The shopper never named this size. Ask them which size they want - "
+                   "offer the ones in stock - and add it once they choose.",
+        }
+    return json.dumps(result, ensure_ascii=False)
+
+
+_SIZE_TOKEN_RE = re.compile(
+    r"\b\d{1,2}(?:\s*[-/]\s*\d{1,2})?\s*(?:y|yrs?|years?|m|mths?|months?)?\b", re.I)
+
+
+def _size_they_named(size: str) -> bool:
+    """Whether a size the shopper typed means this one - "5y" for "5/6Y" counts."""
+    for message in identity.said_messages():
+        for token in _SIZE_TOKEN_RE.findall(message):
+            if extras._size_matches(token, [size]):
+                return True
+    return False
 
 
 _CART_NOISE = {"the", "a", "an", "my", "from", "in", "of", "and", "with", "for", "size", "colour", "color"}
