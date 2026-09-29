@@ -70,7 +70,9 @@ async def add_to_cart(items: list[dict], they_asked: str) -> str:
     items: [{"product": "<name or handle>", "color": "Pink", "size": "5Y", "quantity": 1}]
       "this"/"it" is the product they are viewing. For variants a tool already
       gave you - build_outfit's cart_items - send [{"variant_id": "...", "quantity": 1}].
-      Leave out color or size only where the product has none.
+      color and size are what THE SHOPPER chose in this conversation - never one you
+      picked. If the option they chose does not exist or is sold out and they have not
+      chosen another, leave it out: the tool answers needs_choice and you ask them.
     done=true: it is going in - confirm in one line what was added.
     needs_choice: nothing was added; ask for exactly what it lists as missing,
       from its available options, then call again. Never choose a size for them.
