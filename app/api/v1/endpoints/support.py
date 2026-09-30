@@ -27,7 +27,7 @@ from app.agent.customer_support_agent.shopper_context import (
     describe,
     with_context,
 )
-from app.api.v1.cards import CardCollector, cards_from, _card
+from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, _card
 from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import size_finder, store_profile, suggestions
 from app.services.shopify_client import ShopifyError
@@ -197,6 +197,50 @@ async def _budget_in_their_money(understood: dict, showing: str | None) -> None:
         field["value"] = f"{m.group(1)} {ours}{converted['our_budget']:,.0f}"
         # What they typed, kept for the agent's own reading.
         field["as_they_said_it"] = m.group(0)
+
+
+# Said to the agent when it answered with products it never looked up. Worded as
+# how this shop works, not as a rebuke: that is the framing the model follows.
+_LOOK_IT_UP = ("[How this shop works: every product you name must come from a tool you call this "
+               "turn - the storefront can only draw a picture for what a tool returned, and a name "
+               "from earlier in the chat may not exist. Your last draft named products without "
+               "looking them up. Call the right tool for what they are asking now, with everything "
+               "they have told you, and answer only from what it returns.]")
+
+
+async def _named_without_looking(reply: str, cart: Cart | None) -> bool:
+    """Does a reply written with no tool at all put products in front of the shopper?
+
+    "They are under 1" came back as six baby pieces from memory - three of which
+    the shop does not sell - and "please show me those products" copied the same
+    list again. Nothing was looked up, so there were no cards, and the prompt's
+    "call the tool every time" had already lost to the list sitting in the
+    transcript. This only notices that it happened; what to show is still the
+    agent's call, made again with a tool.
+
+    Two signs, either enough: a real product of ours is named (one in their bag
+    is fine - cart questions are answered from the context block), or two or more
+    prices are quoted, which is a list whether or not its names are real.
+    """
+    if not reply.strip():
+        return False
+    in_bag = {(line.title or "").lower() for line in (cart.items if cart else [])}
+    try:
+        catalogue = await outfit.browse_catalogue()
+    except Exception:  # noqa: BLE001 - a check must never cost the reply
+        logger.debug("No catalogue to check the reply against", exc_info=True)
+        catalogue = {}
+    ours = [p for p in (catalogue.get("products") or [])
+            if p.get("title") and p["title"].lower() not in in_bag]
+    if keep_mentioned(ours, reply):
+        return True
+    if cart and cart.items:
+        return False
+    codes = {c for c in (catalogue.get("currency"), cart.currency if cart else None) if c}
+    if not codes:
+        return False
+    money = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:" + "|".join(map(re.escape, codes)) + r")\b", re.I)
+    return len(money.findall(reply)) >= 2
 
 
 def _welcome_handles() -> list[str]:
@@ -728,18 +772,31 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         country_token = market.set_country(req.context.country if req.context else None)
         showing_token = market.set_showing(req.context.currency if req.context else None)
         try:
-            async for event in CUSTOMER_SUPPORT_AGENT.stream(with_context(req.message, briefing), history):
-                if event["type"] == "token":
-                    yield _sse("token", {"text": event["text"]})
-                elif event["type"] == "reset":
-                    yield _sse("reset", {})
-                elif event["type"] == "tool":
-                    yield _sse("tool", {"name": event["name"], "phase": event["phase"]})
-                    if event["phase"] == "end":
-                        # Collected now, sent once the reply exists - see finalise().
-                        cards.take(event["name"], event.get("output"))
-                elif event["type"] == "final":
-                    reply = event["reply"]
+            asking = with_context(req.message, briefing)
+            # A second pass only when the first named products without calling a
+            # single tool - see _named_without_looking. A pass that called any
+            # tool is never re-run: it may have put something in their bag.
+            for attempt in range(2):
+                used_tools = False
+                async for event in CUSTOMER_SUPPORT_AGENT.stream(asking, history):
+                    if event["type"] == "token":
+                        yield _sse("token", {"text": event["text"]})
+                    elif event["type"] == "reset":
+                        yield _sse("reset", {})
+                    elif event["type"] == "tool":
+                        used_tools = True
+                        yield _sse("tool", {"name": event["name"], "phase": event["phase"]})
+                        if event["phase"] == "end":
+                            # Collected now, sent once the reply exists - see finalise().
+                            cards.take(event["name"], event.get("output"))
+                    elif event["type"] == "final":
+                        reply = event["reply"]
+                if attempt or used_tools or not await _named_without_looking(reply, req.cart):
+                    break
+                logger.info("Session %s: reply named products without a lookup; asking again", session_id)
+                # Take the unlooked-up draft off the shopper's screen.
+                yield _sse("reset", {})
+                asking = f"{asking}\n\n{_LOOK_IT_UP}"
         except Exception:
             logger.exception("Support chat failed for session %s", session_id)
             yield _sse("error", {"message": "Sorry — something went wrong. Please try again."})
