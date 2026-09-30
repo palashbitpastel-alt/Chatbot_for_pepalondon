@@ -71,8 +71,13 @@ _QUESTION_KINDS = [
     ("who", re.compile(r"boy or (?:a )?girl|girl or (?:a )?boy|who is it for|who's it for|who are you shopping for", re.I)),
     ("age", re.compile(r"how old|what age|\bage\b", re.I)),
     ("budget", re.compile(r"budget|how much (?:would|do|can) you|spend", re.I)),
-    ("colour", re.compile(r"colou?r", re.I)),
 ]
+# No colour chips. They were the shop's four commonest colours, drawn under any
+# question with "colour" in it: "the colour or the size?" about a shirt made only
+# in blue got Pink, Blue, Green and White. Which colours a piece comes in is the
+# agent's to say - it has them from the tools, and its own "1. 2. 3." choices
+# are drawn as buttons.
+_ASKS_COLOUR = re.compile(r"colou?r", re.I)
 
 
 def _asks_a_question(reply: str) -> bool:
@@ -92,7 +97,7 @@ def _questions_in(reply: str) -> str:
     return " ".join(_QUESTION_RE.findall(reply or ""))
 
 
-def question_chips(reply: str, colours: list[str] | None = None) -> list[dict]:
+def question_chips(reply: str) -> list[dict]:
     """Chips answering whatever the reply asked, or [] if it asked nothing."""
     if not reply or not _asks_a_question(reply):
         return []
@@ -108,25 +113,7 @@ def question_chips(reply: str, colours: list[str] | None = None) -> list[dict]:
             return [dict(c) for c in AGE_CHIPS]
         if kind == "budget":
             return [dict(c) for c in BUDGET_CHIPS]
-        if colours:
-            return [{"label": c, "prompt": f"In {c.lower()}", "kind": "colour"} for c in colours]
     return []
-
-
-async def _stocked_colours(limit: int = 4) -> list[str]:
-    """The colours the shop actually has most of, so a chip cannot miss."""
-    from app.services import outfit
-
-    try:
-        catalogue = await outfit.browse_catalogue()
-    except Exception:  # noqa: BLE001 - a chip row is never worth failing a reply for
-        logger.warning("Could not read colours for suggestions", exc_info=True)
-        return []
-    counts: dict[str, int] = {}
-    for product in catalogue.get("products") or []:
-        for colour in product.get("colors") or []:
-            counts[colour] = counts.get(colour, 0) + 1
-    return sorted(counts, key=lambda c: -counts[c])[:limit]
 
 
 def plural(name: str) -> str:
@@ -234,10 +221,12 @@ async def for_turn(shown_category: dict | None = None, limit: int = MAX_SUGGESTI
     3. Failing both, the general shelves.
     """
     answering = question_chips(reply)
-    if not answering and reply and _asks_a_question(reply) and re.search(r"colou?r", _questions_in(reply), re.I):
-        answering = question_chips(reply, await _stocked_colours(limit))
     if answering:
         return answering[:limit]
+    # Asked about a colour: the agent's own choices answer it, and a row of
+    # shelves under "which colour?" would only be in the way.
+    if _ASKS_COLOUR.search(_questions_in(reply)):
+        return []
 
     # "Shall I show you our most popular pieces, or a category?" - the first
     # answer to that is the best-sellers chip, so it leads, and the categories
