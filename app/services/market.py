@@ -249,6 +249,19 @@ def _apply(obj, vp: dict, pp: dict, state: dict) -> None:
             state["currency"] = low["currencyCode"]
         for v in obj.values():
             _apply(v, vp, pp, state)
+        # A size shelf's piece carries its own variant_id AND a price_from over
+        # the variants that fit, so neither branch above touched price_from: the
+        # cards read "46.54 INR" - dollars under a rupee label - while the reply,
+        # written from the variants, said 4600. Its range is its variants' range.
+        variants = obj.get("variants")
+        if obj.get("price_from") is not None and obj.get("variant_id") and isinstance(variants, list):
+            priced = [v["price"] for v in variants
+                      if isinstance(v, dict) and str(v.get("variant_id") or "") in vp
+                      and isinstance(v.get("price"), (int, float))]
+            if priced:
+                obj["price_from"] = min(priced)
+                if obj.get("price_to") is not None:
+                    obj["price_to"] = max(priced)
     elif isinstance(obj, list):
         for v in obj:
             _apply(v, vp, pp, state)
