@@ -35,6 +35,9 @@ CARD_TOOLS = {
     "request_order_change": "choices",
 }
 MAX_CARDS = 12
+# A shelf - everything in 5Y, a whole category - opens on this many cards; the
+# storefront fetches the rest from /support/more when the shopper asks.
+SHELF_FIRST = 8
 # Category tiles are the whole answer to "what categories do you have", so
 # every one is drawn - the reply names them all and each must be tappable.
 MAX_CATEGORY_TILES = 60
@@ -303,7 +306,30 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
     # Cardigans" above a set of recommendations.
     if data.get("heading"):
         result["heading"] = data["heading"]
+    # A shelf carries its full size and how to fetch the rest of it.
+    if isinstance(data.get("shelf"), dict):
+        result["shelf"] = data["shelf"]
+        result["total"] = data.get("count") or len(items)
     return result
+
+
+def _as_page(products: dict) -> dict:
+    """A shelf's first page: SHELF_FIRST cards, the total, and how to get more.
+    The shelf key goes when nothing is left to fetch."""
+    items = products.get("items") or []
+    page = {**products, "items": items[:SHELF_FIRST]}
+    if (page.get("total") or 0) <= len(page["items"]):
+        page.pop("shelf", None)
+        page["total"] = len(page["items"])
+    return page
+
+
+def _not_a_shelf(products: dict, items: list[dict]) -> dict:
+    """The same row, cut down to what the reply chose - no longer a whole shelf."""
+    out = {**products, "items": items}
+    out.pop("shelf", None)
+    out.pop("total", None)
+    return out
 
 
 class CardCollector:
@@ -317,6 +343,7 @@ class CardCollector:
         self.products: dict | None = None
         self.products_whole = False
         self.products_fixed = False
+        self.products_tool: str | None = None
         # Instructions for the widget - add these variants, open checkout - in
         # the order the agent issued them.
         self.actions: list[dict] = []
@@ -364,10 +391,11 @@ class CardCollector:
             # Set per result, so a later ordinary search still gets reconciled.
             self.products_whole = tool_name in WHOLE_RESULT_TOOLS
             self.products_fixed = tool_name in FIXED_RESULT_TOOLS
+            self.products_tool = tool_name
         setattr(self, name, cards)
         return name, cards
 
-    def finalise(self, reply: str, narrowed: bool = True) -> None:
+    def finalise(self, reply: str, narrowed: bool = True, narrowed_past_size: bool | None = None) -> None:
         """Reconcile the cards with the answer the shopper actually reads.
 
         A tool hands back everything it found - the whole catalogue, ten search
@@ -398,6 +426,21 @@ class CardCollector:
         items = self.products.get("items") or []
         kept = keep_mentioned(items, _without_choices(reply))
 
+        if self.products_whole and self.products_tool == "browse_in_size":
+            # The size IS the request - "what do you have in 5Y" - so the shelf
+            # is the answer even though the reply names a handful from it: the
+            # shopper was told "39 pieces" and must be able to see them. Only a
+            # further narrowing ("shirts in 5Y", "in blue") trims it to the names.
+            past_size = narrowed if narrowed_past_size is None else narrowed_past_size
+            if past_size and kept:
+                self.products = _not_a_shelf(self.products, kept)
+                return
+            # The pieces the reply named lead, so the words and the first cards agree.
+            named = {id(i) for i in kept}
+            self.products = {**self.products,
+                             "items": kept + [i for i in items if id(i) not in named]}
+            return
+
         if self.products_whole:
             # "Show me dresses" is the whole shelf, however the reply sums it up
             # ("12 pieces, from the Alice to the Royal"): trimming it to the two
@@ -415,13 +458,13 @@ class CardCollector:
             # answer that had already ruled them out. Once the reply names
             # products, those products are the answer.
             if kept:
-                self.products = {**self.products, "items": kept}
+                self.products = _not_a_shelf(self.products, kept)
             return
         # A reply that names nothing is an apology, a question, or a refusal - and
         # none of those should be sitting under a grid of products. Keeping the
         # whole list there was worse than showing none: it put girls' party
         # dresses under "I have nothing for a 9 year old boy".
-        self.products = {**self.products, "items": kept} if kept else None
+        self.products = _not_a_shelf(self.products, kept) if kept else None
 
     def drop_empty_checkout(self) -> None:
         """Take out a checkout redirect when the bag is empty - unless this very turn
@@ -440,7 +483,7 @@ class CardCollector:
             return
         items = self.products.get("items") or []
         if len(items) > count:
-            self.products = {**self.products, "items": items[:count]}
+            self.products = _not_a_shelf(self.products, items[:count])
 
     def shown_products(self) -> list[dict]:
         """Every product this reply put in front of the shopper - the grid and any
@@ -453,8 +496,11 @@ class CardCollector:
         out: dict = {}
         if self.products is not None:
             items = self.products.get("items") or []
-            out["products"] = ({**self.products, "items": items[:MAX_CARDS]}
-                               if len(items) > MAX_CARDS else self.products)
+            if self.products.get("shelf"):
+                out["products"] = _as_page(self.products)
+            else:
+                out["products"] = ({**self.products, "items": items[:MAX_CARDS]}
+                                   if len(items) > MAX_CARDS else self.products)
         if self.outfit is not None:
             out["outfit"] = self.outfit
         if self.orders is not None:

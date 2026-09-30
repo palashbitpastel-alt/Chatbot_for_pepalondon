@@ -1034,7 +1034,11 @@ def minor_to_major(value) -> float | None:
 # All four have to reach the same products, so the reference is resolved here
 # rather than in the tool, and the caller never has to know which kind it was.
 
-CATEGORY_PRODUCT_LIMIT = 24    # most products one category may return
+# Most products one category may return. 50 with their variants is the size
+# scan's page too - well inside Shopify's cost limit for a single query.
+CATEGORY_PRODUCT_LIMIT = 50
+# A whole shelf, for paging through in the chat.
+SHELF_LIMIT = 50
 CATEGORY_SUGGESTIONS = 12      # categories offered back when the name misses
 
 _DIGITS_RE = re.compile(r"^\d+$")

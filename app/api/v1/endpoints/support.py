@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.agent.customer_support_agent import CUSTOMER_SUPPORT_AGENT
+from app.agent.customer_support_agent import tools
 from app.core.config import settings
 from app.agent.customer_support_agent.shopper_context import (
     Cart,
@@ -381,6 +382,53 @@ async def _save_turn(session_id: str, message: str, reply: str) -> None:
             ]
         )
         await db.commit()
+
+
+class ShelfRequest(BaseModel):
+    """The rest of a shelf the chat opened: sent back exactly as the products
+    event carried it, plus the cards the shopper already has."""
+
+    tool: str = Field(max_length=40)
+    arg: str = Field(max_length=200)
+    for_: str | None = Field(default=None, alias="for", max_length=20)
+    colour: str | None = Field(default=None, max_length=40)
+    shown: list[str] = Field(default_factory=list, max_length=300)
+    # How many more to send; 0 is everything that is left.
+    limit: int = Field(default=8, ge=0, le=100)
+    country: str | None = Field(default=None, max_length=8)
+    currency: str | None = Field(default=None, max_length=8)
+
+
+@router.post("/support/more")
+async def support_more(req: ShelfRequest) -> dict:
+    """The next cards of a shelf - "Show 8 more", or "Show all" with limit 0.
+
+    The first reply carries only the first page, so a 39-piece answer is not 39
+    cards loaded at once; this fetches the shelf again with the same audience and
+    colour and returns what the shopper has not seen yet, in the same order.
+    """
+    if req.tool not in tools.SHELF_TOOLS:
+        raise HTTPException(status_code=400, detail="Not a shelf")
+    audience = identity.set_audience(req.for_)
+    colour = identity.set_colour(req.colour)
+    country = market.set_country(req.country)
+    showing = market.set_showing(req.currency)
+    try:
+        found = await market.localize(await tools.shelf(req.tool, req.arg))
+    except ShopifyError:
+        logger.warning("Could not fetch more of shelf %s %s", req.tool, req.arg, exc_info=True)
+        raise HTTPException(status_code=502, detail="Could not load more products") from None
+    finally:
+        identity.reset_audience(audience)
+        identity.reset_colour(colour)
+        market.reset_country(country)
+        market.reset_showing(showing)
+    page = cards_from(req.tool, json.dumps(found, ensure_ascii=False)) or {"items": []}
+    seen = set(req.shown)
+    left = [c for c in page["items"] if str(c.get("product_id")) not in seen]
+    items = left if req.limit == 0 else left[:req.limit]
+    return {"items": items, "currency": page.get("currency"),
+            "total": page.get("total", len(page["items"])), "remaining": len(left) - len(items)}
 
 
 @router.get("/support/categories")
@@ -815,10 +863,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # gets the cards without having to follow the stream.
         # Did this message narrow a category (colour, age, size, budget)? If not, a
         # category browse is shown whole rather than trimmed to the names said.
-        narrowed = any(f["key"] in ("colour", "age", "size", "budget", "occasion", "style")
-                       for f in needs.understood([req.message])["fields"]) \
-            or await _names_a_kind(req.message)
-        cards.finalise(reply, narrowed=narrowed)
+        asked_for = {f["key"] for f in needs.understood([req.message])["fields"]}
+        names_a_kind = await _names_a_kind(req.message)
+        narrowed = bool(asked_for & {"colour", "age", "size", "budget", "occasion", "style"}) or names_a_kind
+        # A size shelf is only cut down by something beyond the size itself.
+        past_size = bool(asked_for & {"colour", "budget", "occasion", "style"}) or names_a_kind
+        cards.finalise(reply, narrowed=narrowed, narrowed_past_size=past_size)
         cards.limit_products(requested)
         if req.cart is not None and not req.cart.items:
             cards.drop_empty_checkout()

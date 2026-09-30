@@ -740,9 +740,51 @@ async def browse_in_size(size: str) -> str:
     12Y") leaves the shopper reading a number with unnamed cards beside it.
     """
     try:
-        return json.dumps(await shopify_storefront.products_in_size(size), ensure_ascii=False)
+        return json.dumps(_for_the_model(await shelf("browse_in_size", size)), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_in_size", exc)
+
+
+# ── A whole shelf, a page at a time ────────────────────────────────────────
+# "39 pieces in 5Y" could only ever show twelve: the lookups stopped at twelve,
+# and the boys-only filter then ran over those twelve alone, so the count was
+# wrong too. A shelf is now filtered whole. The agent reads the first
+# SHELF_FOR_MODEL of it - every product is tokens on every step - and the
+# storefront pages through the rest from /support/more, which calls shelf()
+# again with the same arguments.
+
+SHELF_FOR_MODEL = 12
+SHELF_TOOLS = ("browse_in_size", "browse_category")
+
+
+async def shelf(tool: str, arg: str) -> dict:
+    """Every product on one shelf, for whoever the shopper is shopping for, in
+    their colour first. The audience and colour are read from the current turn."""
+    if tool == "browse_in_size":
+        # The size scan reads every product anyway; keep all it found.
+        found = await shopify_storefront.products_in_size(
+            arg, limit=shopify_storefront.SIZE_SCAN_PAGES * shopify_storefront.SIZE_SCAN_PAGE)
+    elif tool == "browse_category":
+        found = await shopify_storefront.category_products(arg, limit=shopify_storefront.SHELF_LIMIT)
+    else:
+        raise ValueError(f"not a shelf: {tool}")
+    found = _in_their_colour(_for_this_shopper(found))
+    if isinstance(found, dict) and found.get("found") is not False:
+        found["count"] = len(found.get("products") or [])
+        # How to fetch this shelf again: the storefront sends it back for more.
+        found["shelf"] = {"tool": tool, "arg": arg, "for": identity.shopping_for(),
+                          "colour": identity.wants_colour()}
+    return found
+
+
+def _for_the_model(found: dict) -> dict:
+    """The shelf as the agent reads it: the first few, and how many there are."""
+    products = found.get("products") if isinstance(found, dict) else None
+    if not isinstance(products, list) or len(products) <= SHELF_FOR_MODEL:
+        if isinstance(found, dict) and isinstance(products, list):
+            found["more_available"] = False
+        return found
+    return {**found, "products": products[:SHELF_FOR_MODEL], "more_available": True}
 
 
 
@@ -848,8 +890,7 @@ async def browse_category(category: str) -> str:
     rather than passing them off as part of the category.
     """
     try:
-        found = await shopify_storefront.category_products(category)
-        return json.dumps(_in_their_colour(_for_this_shopper(found)), ensure_ascii=False)
+        return json.dumps(_for_the_model(await shelf("browse_category", category)), ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_category", exc)
 
