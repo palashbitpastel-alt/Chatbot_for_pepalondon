@@ -531,6 +531,11 @@ def _role_of(product: dict) -> str:
     return _category(product.get("title") or "", None)
 
 
+def _age_label(age: float) -> str:
+    """How a size label names this age: 0.25 years is "3M", 5 is "5Y"."""
+    return f"{round(age * 12)}M" if age < 2 and age != int(age) else f"{int(age)}Y"
+
+
 def _fits_age(sizes: list[str], age: int | None) -> bool:
     """Whether a piece comes in a size for this age. Pieces with no size run fit."""
     if age is None or not sizes:
@@ -710,6 +715,15 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                  "here (e.g. no top in their colour): take it from browse_catalogue - a whole "
                  "outfit, never a smaller one.")
                 if not still_to_ask and not wanted_category else None,
+        # A few picks, one per part of an outfit - not the whole shop. Said here,
+        # beside the pieces, because a 3-month-old was offered an 18M shirt and
+        # then asked "shall I look in his size?" instead of being shown it.
+        "check_sizes": (
+            f"These are a few picks, not everything we have. Their size is {_age_label(age)}: "
+            f"leave out any piece here that does not come in it, and if that leaves nothing "
+            f"for what they asked, call browse_in_size('{_age_label(age)}') now and show "
+            f"what it finds instead of asking."
+        ) if age else None,
         "count": len(picked),
         "products": [
             {
