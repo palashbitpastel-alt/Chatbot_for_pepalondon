@@ -142,6 +142,11 @@ def _requested(variants: list[dict], colour: str, size: str) -> dict | None:
             return {"colour": colour or None, "size": size, "exists": False,
                     "sizes_in_this_colour": sizes, "same_size_in_other_colours": elsewhere,
                     "tell_customer": tell}
+        # "5Y" can mean both 4/5Y and 5/6Y: ask, rather than answer for one of them.
+        if len(meant) > 1:
+            return {"colour": colour or None, "size": size, "exists": True, "ambiguous": True,
+                    "could_mean": meant,
+                    "tell_customer": f"{size} could mean {' or '.join(meant)} - ask which they mean."}
         if meant:
             pool = [v for v in pool if v["size"] in meant]
     buyable = [v for v in pool if v["available"]]
@@ -155,7 +160,7 @@ def _requested(variants: list[dict], colour: str, size: str) -> dict | None:
         pick = buyable[0]
         return {"colour": pick["colour"], "size": pick["size"], "exists": True, "available": True,
                 "variant_id": pick["variant_id"], "price": pick["price"],
-                "tell_customer": f"{label} is in stock at {pick['price']}."}
+                "tell_customer": f"{label} is in stock."}
     return {"colour": colour or None, "size": pool[0]["size"] if pool else size, "exists": True, "available": False,
             "in_stock_sizes_in_this_colour": other,
             "same_size_in_other_colours": other_colours,

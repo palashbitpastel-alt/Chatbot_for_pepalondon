@@ -79,7 +79,7 @@ def span_of(raw: str | None) -> tuple[int, int] | None:
     if not raw:
         return None
     text = raw.strip().upper().replace("–", "-").replace(" ", "")
-    if m := re.fullmatch(r"(\d{1,2})-(\d{1,2})(M|Y|YRS?|YEARS?|MTHS?|MONTHS?)?", text):
+    if m := re.fullmatch(r"(\d{1,2})[-/](\d{1,2})(M|Y|YRS?|YEARS?|MTHS?|MONTHS?)?", text):
         unit = "M" if (m.group(3) or "Y").startswith("M") else "Y"
         return _label_index(int(m.group(1)), unit), _label_index(int(m.group(2)), unit)
     if m := re.fullmatch(r"(?:AGE)?(\d{1,2})(M|Y|YRS?|YEARS?|MTHS?|MONTHS?)?", text):
@@ -373,6 +373,8 @@ async def size_card(product_ref: str | None, size: str, reason: str, age: float 
         if exact is None:
             return {"found": False, "reason": "not_sold_in_that_size", "asked": size, "sizes_sold": sizes}
         size = exact
+    # The right size for the child and a size in stock are two answers: say both.
+    in_stock = next((s["in_stock"] for s in sizes if s["size"] == size), None)
     result = {
         "found": True,
         "recommended": size,
@@ -389,7 +391,10 @@ async def size_card(product_ref: str | None, size: str, reason: str, age: float 
             "usual_size": usual_size or None,
         },
         "sizes_offered": offered,
+        "in_stock": in_stock,
     }
+    if in_stock is False:
+        result["fit_note"] = (result["fit_note"] + " " if result["fit_note"] else "") + "This size is sold out right now."
     if product:
         result["product"] = {
             "title": product.get("title"),

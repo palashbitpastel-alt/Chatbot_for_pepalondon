@@ -96,13 +96,14 @@ def _season(text: str) -> str | None:
     return next((name for name, words in _SEASONS if any(w in lowered for w in words)), None)
 
 
-FIELD_ORDER = ["for", "age", "occasion", "season", "style", "colour", "budget", "size"]
+FIELD_ORDER = ["for", "age", "occasion", "season", "style", "category", "colour", "budget", "size"]
 # What is worth remembering between visits: who they shop for and her size.
 # Occasion and budget belong to one shopping trip, not the next.
 REMEMBERED = ("for", "age", "size", "colour")
 LABELS = {
     "for": "For", "age": "Age", "occasion": "Occasion", "style": "Style",
     "colour": "Colour", "budget": "Budget", "size": "Size", "season": "Season",
+    "category": "Looking for",
 }
 
 

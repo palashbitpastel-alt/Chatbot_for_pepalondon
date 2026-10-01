@@ -31,11 +31,18 @@ Return ONLY a JSON object with these keys, each a short string or null when not 
 - "budget": "Under {sym}15000" or "Around {sym}400" - their own currency sign if they used one,
   otherwise {sym}.
 - "size": a clothing size only if they named one, e.g. "5Y", "18M", "5-6Y".
+- "category": the kind of piece they want, singular, e.g. "Dress", "Shirt", "Shoes" - kept
+  until they ask for a different kind.
+- "count": how many items their LATEST message asks to see, as a number ("show me 2 jackets"
+  -> 2), else null. Never an age, a size, a price or a number of children.
 The latest message wins when they change something. A different child from the one before
-(another age) replaces the earlier one's size and colour.{remembered}"""
+(another age) replaces the earlier one's size and colour, and "for" is null unless the
+messages say who this child is.{remembered}"""
 
 
 def _fields(found: dict) -> dict:
+    raw_count = found.get("count")
+    count = raw_count if isinstance(raw_count, int) and 0 < raw_count <= 12 else None
     found = {k: str(v).strip() for k, v in found.items() if k in needs.FIELD_ORDER and v and str(v).strip()}
     # The rest of the shop reads a budget as "Under ₹15000" / "Around £400".
     if (b := found.get("budget")) and not re.match(r"(?i)(under|around)\b", b):
@@ -46,10 +53,14 @@ def _fields(found: dict) -> dict:
     # An age with no size given is still a size: a 5 year old wears 5Y.
     if age_years and "size" not in found:
         found["size"] = f"{age_years}Y"
+    # A baby's age in months is a size too: "3 months" wears 3M.
+    elif (m := re.match(r"(\d{1,2})\s*month", found.get("age", ""))) and "size" not in found:
+        found["size"] = f"{int(m.group(1))}M"
     return {
         "fields": [{"key": k, "label": needs.LABELS[k], "value": found[k]}
                    for k in needs.FIELD_ORDER if k in found],
         "age": age_years,
+        "count": count,
     }
 
 
@@ -67,7 +78,7 @@ async def understood(messages: list[str], base: dict | None = None, currency: st
         llm = build_llm(temperature=0, max_tokens=200)
         answer = await asyncio.wait_for(llm.ainvoke([
             ("system", _PROMPT.format(sym=sym, remembered=remembered)),
-            ("human", "\n".join(f"- {m}" for m in said[-12:])),
+            ("human", "\n".join(f"- {m}" for m in said[-24:])),
         ]), timeout=TIMEOUT_SECONDS)
         text = answer.content if isinstance(answer.content, str) else str(answer.content)
         found = json.loads(re.search(r"\{.*\}", text, re.S).group(0))

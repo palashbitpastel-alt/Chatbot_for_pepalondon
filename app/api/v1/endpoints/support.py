@@ -41,7 +41,7 @@ router = APIRouter(tags=["support"])
 
 # Every stored turn is replayed on every step of the next turn, so this stays
 # small: a shopper's thread rarely needs more than the last few exchanges.
-HISTORY_LIMIT = 8
+HISTORY_LIMIT = 16
 # Support conversations share the chat_messages table with the admin chat, so
 # they carry their own session-id prefix and only ever load their own history.
 SESSION_PREFIX = "cs_"
@@ -92,36 +92,6 @@ _GREETING_WORDS = {
     "namaste", "hola", "greetings", "good", "morning", "afternoon", "evening",
     "there", "all", "team", "everyone", "folks", "sup",
 }
-
-
-# How many they asked for - "2 jackets", "three shirts", "a couple of dresses".
-# Asked for two, the shopper was shown the whole shelf of three: nothing carried
-# the number anywhere. Numbers that are ages, sizes, prices or people ("my 7
-# year old", "size 10", "under 20000", "my 2 kids") are not counts. "One" is
-# left out on purpose - "which one is better" is not a request for one item.
-_COUNT_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-                "eight": 8, "nine": 9, "ten": 10, "couple": 2}
-_NOT_A_COUNT = (r"(?:years?|yrs?|y|months?|mths?|mos?|m|yo|weeks?|days?|inr|rs|rupees|sizes?|"
-                r"kids?|children|child|boys|girls|sons?|daughters?|babies|twins|people|persons|"
-                r"siblings|grand\w*)\b")
-_COUNT_RE = re.compile(
-    r"(?<!size\s)(?<!sizes\s)(?<!age\s)\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|couple)"
-    rf"\s+(?:of\s+)?(?!{_NOT_A_COUNT})[a-z]",
-    re.I,
-)
-MAX_REQUESTED = 12
-
-
-def _requested_count(message: str) -> int | None:
-    """How many things the shopper asked to see, or None if they named no number.
-
-    "2 shirts and 3 trousers" is five things on screen, so matches add up.
-    """
-    total = 0
-    for match in _COUNT_RE.finditer(message or ""):
-        word = match.group(1).lower()
-        total += int(word) if word.isdigit() else _COUNT_WORDS[word]
-    return total if 0 < total <= MAX_REQUESTED else None
 
 
 def _is_greeting(message: str) -> bool:
@@ -224,7 +194,7 @@ _LOOK_IT_UP = ("[How this shop works: every product you name must come from a to
                "they have told you, and answer only from what it returns.]")
 
 
-async def _named_without_looking(reply: str, cart: Cart | None) -> bool:
+async def _named_without_looking(reply: str, cart: Cart | None, on_screen: list[str] | None = None) -> bool:
     """Does a reply written with no tool at all put products in front of the shopper?
 
     "They are under 1" came back as six baby pieces from memory - three of which
@@ -241,6 +211,9 @@ async def _named_without_looking(reply: str, cart: Cart | None) -> bool:
     if not reply.strip():
         return False
     in_bag = {(line.title or "").lower() for line in (cart.items if cart else [])}
+    # Cards on their screen were looked up already: answering "which is cheaper,
+    # the first or the second?" from them is not a reply from memory.
+    in_bag |= {str(t).lower() for t in (on_screen or [])}
     try:
         catalogue = await outfit.browse_catalogue()
     except Exception:  # noqa: BLE001 - a check must never cost the reply
@@ -250,9 +223,10 @@ async def _named_without_looking(reply: str, cart: Cart | None) -> bool:
             if p.get("title") and p["title"].lower() not in in_bag]
     if keep_mentioned(ours, reply):
         return True
-    if cart and cart.items:
+    if (cart and cart.items) or on_screen:
         return False
-    codes = {c for c in (catalogue.get("currency"), cart.currency if cart else None) if c}
+    # The shopper's own currency too: a made-up "1,299 INR" list must be caught.
+    codes = {c for c in (catalogue.get("currency"), cart.currency if cart else None, market._showing.get()) if c}
     if not codes:
         return False
     money = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:" + "|".join(map(re.escape, codes)) + r")\b", re.I)
@@ -344,6 +318,21 @@ def _resolve_session(session_id: str | None) -> str:
     return SESSION_PREFIX + uuid.uuid4().hex
 
 
+async def _user_messages(session_id: str, limit: int = 24) -> list[str]:
+    """What the shopper has said in this chat, oldest first - more of it than the
+    model replays, so what they told us early on is still read."""
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(ChatMessage.content)
+                .where(ChatMessage.session_id == session_id, ChatMessage.role == "user")
+                .order_by(ChatMessage.id.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+    return list(reversed(rows))
+
+
 async def _load_history(session_id: str, asking: str = "") -> list[tuple[str, str]]:
     async with AsyncSessionLocal() as db:
         rows = (
@@ -371,7 +360,9 @@ def _without_repeats(turns: list[tuple[str, str]], asking: str) -> list[tuple[st
     to what the shopper was looking at.
     """
     key = " ".join(asking.lower().split())
-    if not key:
+    # Short answers ("yes", "show me") repeat all the time; dropping the earlier
+    # one took the assistant's offer it answered with it.
+    if not key or len(key.split()) < 3:
         return turns
 
     kept: list[tuple[str, str]] = []
@@ -711,10 +702,6 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         briefing = f"{briefing}\n\n{store}" if briefing else store
     # Told outright rather than left for the model to count off the message: it
     # was reading "2 jackets" and still showing the shelf.
-    requested = _requested_count(req.message)
-    if requested:
-        ask = f"[They asked for exactly {requested} item(s): choose and name exactly {requested}, no more]"
-        briefing = f"{briefing}\n\n{ask}" if briefing else ask
     remembered = {k: str(v)[:40] for k, v in (req.profile or {}).items() if k in needs.REMEMBERED}
     if remembered and req.message.strip():
         told = "; ".join(f"{needs.LABELS[k]}: {v}" for k, v in remembered.items())
@@ -745,7 +732,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # the widget as the "Understood" panel and the "Searching for" chips.
         turn_understood = None
         if req.message.strip():
-            said = [c for r, c in history if r == "user"] + [req.message]
+            # Everything they have told us in this chat, not just what the model
+            # replays: the 8-row window lost the age and budget after 4 turns.
+            said = (await _user_messages(session_id)) + [req.message]
             understood = await understanding.understood(
                 said, base=remembered, currency=(req.context.currency if req.context else None))
             # Who they are shopping for, so a mixed collection comes back as
@@ -860,6 +849,11 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 note = (f"[Understood from the chat so far ('For' is who the purchase is for): {told}. "
                         "Use these; do not ask for them again.]")
                 turn_briefing = f"{turn_briefing}\n{note}" if turn_briefing else note
+            # How many they asked to see, as the model read it - never an age
+            # mistaken for a count ("my daughter is 4" once meant 4 items).
+            if n := (turn_understood or {}).get("count"):
+                ask = f"[They asked for exactly {n} item(s): choose and name exactly {n}, no more]"
+                turn_briefing = f"{turn_briefing}\n{ask}" if turn_briefing else ask
             asking = with_context(req.message, turn_briefing)
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any
@@ -880,7 +874,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                             cards.take(event["name"], event.get("output"))
                     elif event["type"] == "final":
                         reply, declared = split_show(_without_cards_note(event["reply"]))
-                if attempt or used_tools or not await _named_without_looking(reply, req.cart):
+                if attempt or used_tools or not await _named_without_looking(
+                        reply, req.cart, req.context.cards_on_screen if req.context else None):
                     break
                 logger.info("Session %s: reply named products without a lookup; asking again", session_id)
                 # Take the unlooked-up draft off the shopper's screen.
@@ -908,19 +903,33 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # under a reply that had picked out the pieces in his size.
         # What the model read for the panel this turn, when it read anything.
         asked_for = {f["key"] for f in (turn_understood or {}).get("fields") or []}
-        names_a_kind = await _names_a_kind(req.message)
+        try:
+            names_a_kind = await _names_a_kind(req.message)
+        except Exception:  # noqa: BLE001 - a hint for card trimming, never worth the reply
+            logger.warning("Could not read the kind of piece for session %s", session_id, exc_info=True)
+            names_a_kind = False
         narrowed = bool(asked_for & {"colour", "age", "size", "budget", "occasion", "style"}) or names_a_kind
         # A size shelf is only cut down by something beyond the size itself.
         past_size = bool(asked_for & {"colour", "budget", "occasion", "style"}) or names_a_kind
-        cards.finalise(reply, narrowed=narrowed, narrowed_past_size=past_size, declared=declared)
-        cards.limit_products(requested)
-        if req.cart is not None and not req.cart.items:
-            cards.drop_empty_checkout()
-        drawn = cards.as_dict()
+        # The reply is already written: a failure choosing its cards or saving the
+        # turn must not end the stream without it (the widget shows text only on
+        # `done`, so the shopper would see nothing at all).
+        try:
+            cards.finalise(reply, narrowed=narrowed, narrowed_past_size=past_size, declared=declared)
+            cards.limit_products((turn_understood or {}).get("count"))
+            if req.cart is not None and not req.cart.items:
+                cards.drop_empty_checkout()
+            drawn = cards.as_dict()
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not finish the cards for session %s", session_id)
+            drawn = {}
         # Saved as the shopper read it. A note of the cards used to ride along
         # here and the agent copied it into its next reply; the widget now sends
         # the cards on screen with every message instead (cards_on_screen).
-        await _save_turn(session_id, req.message, _without_cards_note(reply))
+        try:
+            await _save_turn(session_id, req.message, _without_cards_note(reply))
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not save the turn for session %s", session_id)
         for name, payload in drawn.items():
             yield _sse(name, payload)
         # The widget carries these out, in order: add these variants to the bag,
@@ -942,7 +951,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         if chips:
             yield _sse("suggestions", {"suggestions": chips})
 
-        done_payload = {"session_id": session_id, "reply": reply, **cards.as_dict()}
+        done_payload = {"session_id": session_id, "reply": reply, **drawn}
         if chips:
             done_payload["suggestions"] = chips
         if cart_payload:

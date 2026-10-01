@@ -302,6 +302,11 @@ async def localize(result):
     except (ShopifyError, KeyError) as exc:
         logger.warning("Market prices for %s unavailable, showing base prices: %s", country, exc)
         return result
+    # Some ids unpriced for this market: relabelling would put base amounts under
+    # the shopper's currency ("46.54 INR"), so keep the store's own prices.
+    if (variants - vp.keys()) or (products - pp.keys()):
+        logger.info("Some prices missing for %s; keeping base prices", country)
+        return original
     state: dict = {}
     _apply(result, vp, pp, state)
     currency = state.get("currency")
@@ -323,6 +328,17 @@ async def localize(result):
             result["total"] = _money(total)
             if result.get("budget"):
                 result["within_budget"] = float(total) <= float(result["budget"])
+                # What is left or over, in the same money as the total.
+                diff = float(result["budget"]) - float(total)
+                result.pop("remaining", None)
+                result.pop("over_by", None)
+                result["remaining" if diff >= 0 else "over_by"] = _money(abs(Decimal(str(diff))))
+            # The multi-item saving was worked out on the base total: redo it on
+            # this one, so "you save" is in the shopper's money too.
+            mb = result.get("multi_buy")
+            if isinstance(mb, dict) and mb.get("tiers"):
+                from app.services import multi_buy
+                result["multi_buy"] = multi_buy.summary(mb["tiers"], mb.get("item_count"), total, currency)
         # A comparison's sentences quote prices; rebuild them from the new ones.
         if isinstance(result.get("products"), list) and "difference" in result and len(result["products"]) >= 2:
             try:

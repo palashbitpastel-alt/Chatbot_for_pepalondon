@@ -63,6 +63,9 @@ def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> ChatOp
         base_url=settings.DEEPSEEK_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
+        # A stalled model must not hold the shopper's chat for ten minutes.
+        timeout=60,
+        max_retries=1,
     )
 
 
@@ -84,7 +87,8 @@ def build_agent_executor(
     )
     llm = build_llm(temperature, max_tokens)
     agent = create_tool_calling_agent(llm, list(tools), prompt)
-    return AgentExecutor(agent=agent, tools=list(tools), max_iterations=max_iterations)
+    return AgentExecutor(agent=agent, tools=list(tools), max_iterations=max_iterations,
+                         max_execution_time=120)
 
 
 def to_messages(history: ChatHistory) -> list[BaseMessage]:
@@ -175,4 +179,8 @@ async def stream_executor(
             if isinstance(output, dict) and isinstance(output.get("output"), str):
                 final = output["output"]
 
+    # Hitting the step or time limit returns LangChain's own sentence; a shopper
+    # should never read "Agent stopped due to iteration limit".
+    if final and final.startswith("Agent stopped due to"):
+        final = "Sorry, that took me longer than it should. Could you ask me that again?"
     yield {"type": "final", "reply": plain_dashes(final or "".join(tokens))}

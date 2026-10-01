@@ -28,6 +28,9 @@ class CartLine(BaseModel):
     product_id: int | str | None = None
     title: str | None = None
     variant_title: str | None = None
+    # Shopify's own option names and values for the line ("Size": "5/6Y"), so a
+    # size is read by its name rather than guessed from how its value looks.
+    options: list[dict] | None = None
     quantity: int = 1
     line_price: int | None = None
     handle: str | None = None

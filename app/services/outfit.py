@@ -11,9 +11,11 @@ Reads are live from the Shopify Admin API and restricted to ACTIVE products, so
 a look can never contain something a shopper cannot buy.
 """
 
+import copy
 import json
 import logging
 import re
+import time
 from decimal import Decimal, InvalidOperation
 
 from app.services import occasions, parts, suits
@@ -254,8 +256,20 @@ def _suits(tags: list[str] | None) -> list[str]:
     return [name for name in AUDIENCE_TAGS if name.lower() in lowered]
 
 
+# The whole catalogue is read by several steps of one reply (the tools, the
+# no-lookup check, the kind-of-piece check) and was rescanned page by page each
+# time. Held briefly, handed out as copies because callers annotate it. Stock is
+# re-read live before anything goes in the bag, so a short hold cannot sell
+# something that has just sold out.
+_CATALOGUE: tuple[float, dict] | None = None
+CATALOGUE_SECONDS = 120
+
+
 async def browse_catalogue() -> dict:
     """Everything a shopper can buy, grouped by category so a look can be composed."""
+    global _CATALOGUE
+    if _CATALOGUE and time.monotonic() - _CATALOGUE[0] < CATALOGUE_SECONDS:
+        return copy.deepcopy(_CATALOGUE[1])
     currency = (await shop_info())["currency"]
     products = []
     for node in await _active_products():
@@ -297,12 +311,14 @@ async def browse_catalogue() -> dict:
     by_category: dict[str, list[str]] = {}
     for product in products:
         by_category.setdefault(product["category"], []).append(product["handle"])
-    return {
+    result = {
         "currency": currency,
         "count": len(products),
         "categories": by_category,
         "products": products,
     }
+    _CATALOGUE = (time.monotonic(), result)
+    return copy.deepcopy(result)
 
 
 # ── Adding to the shopper's bag ────────────────────────────────────────────
@@ -610,7 +626,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     """
     from app.services import shopper_identity as identity
 
-    catalogue = await browse_catalogue()
+    # In the shopper's own money: their budget is in it, and a ₹5000 budget
+    # compared with base-currency prices let every $23 piece through.
+    from app.services import market
+    catalogue = await market.localize(await browse_catalogue())
     audience = _WHO.get((for_who or "").strip().lower()) or identity.shopping_for()
     # The agent does not always pass on what the shopper said; the preference
     # is held for the turn either way, so a suggestion never loses it.
@@ -977,7 +996,10 @@ async def complete_the_look(product: str, size: str | None = None,
     look is priced through build_outfit so every line is a real variant the
     storefront can add to the bag.
     """
-    catalogue = await browse_catalogue()
+    # In the shopper's own money: their budget is in it, and a ₹5000 budget
+    # compared with base-currency prices let every $23 piece through.
+    from app.services import market
+    catalogue = await market.localize(await browse_catalogue())
     wanted = " ".join((product or "").lower().split())
     stock = [p for p in catalogue["products"] if p["in_stock"]]
     anchor = next((p for p in stock if p["handle"] == wanted), None)
@@ -1399,6 +1421,14 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
                              "reason": "already_have_one", "instead_of": worn[role]})
             continue
         worn[role] = product["title"]
+
+        # No size given for a piece sold in several: that is the shopper's (or
+        # the agent's, from their age) choice to make - never the first in stock.
+        sizes_sold = _options_of(product).get("Size") or []
+        if not size and len(sizes_sold) > 1:
+            problems.append({"handle": handle, "title": product["title"], "reason": "size_needed",
+                             "available_sizes": sizes_sold})
+            continue
 
         variant = _match_variant(product, colour, size)
         if variant is None:

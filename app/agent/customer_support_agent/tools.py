@@ -163,6 +163,10 @@ def _size_they_named(size: str) -> bool:
     """Whether a size the shopper typed means this one - "5y" for "5/6Y" counts."""
     for message in identity.said_messages():
         for token in _SIZE_TOKEN_RE.findall(message):
+            # A bare number is an age, a count or a price as often as a size:
+            # "add 2 of them" must not count as choosing 2/3Y.
+            if re.fullmatch(r"\d{1,2}", token.strip()):
+                continue
             if extras._size_matches(token, [size]):
                 return True
     return False
@@ -225,7 +229,8 @@ async def remove_from_cart(products: list[str] | None = None, everything: bool =
                 continue
         best = max(h for h, _ in scored)
         top = [line for h, line in scored if h == best]
-        if len(top) > 1 and len({line.title for line in top}) > 1:
+        # Two lines of one product (the bonnet in two sizes) are two lines: ask.
+        if len(top) > 1:
             which_one.append({"asked_for": name, "lines": [f"{l.title} ({l.variant_title})" if l.variant_title else l.title for l in top]})
             continue
         for line in top:
@@ -241,10 +246,23 @@ async def remove_from_cart(products: list[str] | None = None, everything: bool =
 _SIZE_LIKE = re.compile(r"^(?:\d{1,2}\s*-\s*\d{1,2}\s*[ym]|\d{1,2}\s*[ym]|\d{2}(?:\.5)?|eu\s*\d{2}|xs|s|m|l|xl|one size)$", re.I)
 
 
-def _line_options(variant_title: str | None) -> tuple[str | None, str | None]:
-    """(colour, size) read off a cart line's "Pink / 5Y"."""
+def _line_options(variant_title: str | None, options: list[dict] | None = None) -> tuple[str | None, str | None]:
+    """(colour, size) of a cart line - by the store's option names when the
+    storefront sent them, else read off its "Pink / 5Y" title."""
     colour = size = None
-    for part in (variant_title or "").split("/"):
+    for option in options or []:
+        name = str((option or {}).get("name") or "").lower()
+        value = (option or {}).get("value")
+        if not value:
+            continue
+        if re.search(r"colou?r", name):
+            colour = str(value)
+        elif re.search(r"size|age", name):
+            size = str(value)
+    if colour or size:
+        return colour, size
+    # " / " separates options; a size can carry its own "/" ("5/6Y", "10UK/11US").
+    for part in (variant_title or "").split(" / "):
         part = part.strip()
         if not part or part.lower() == "default title":
             continue
@@ -275,12 +293,12 @@ async def edit_cart_item(product: str = "", size: str = "", color: str = "", qua
     scored = [(len(want & _cart_words(f"{l.title or ''} {l.variant_title or ''}")), l) for l in lines]
     best = max((h for h, _ in scored), default=0)
     top = [l for h, l in scored if h == best and h > 0] or (lines if len(lines) == 1 else [])
-    if len({l.title for l in top}) != 1:
+    if len(top) != 1:
         return json.dumps({"done": False, "which_one": [
             f"{l.title} ({l.variant_title})" if l.variant_title else l.title for l in (top or lines)]},
             ensure_ascii=False)
     line = top[0]
-    old_colour, old_size = _line_options(line.variant_title)
+    old_colour, old_size = _line_options(line.variant_title, line.options)
     new_qty = int(quantity) if quantity and int(quantity) > 0 else int(line.quantity or 1)
     changing_variant = (size and size.strip().lower() != (old_size or "").lower()) or \
                        (color and color.strip().lower() != (old_colour or "").lower())
@@ -734,6 +752,9 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
     Omit color/size where the product has none. budget: 0 if not given.
     Returns total, within_budget, cart_items (variant ids for the storefront), and
     problems listing the colours/sizes that do exist so you can swap and retry.
+    reason=size_needed: you sent no size for a piece sold in several - give the
+    size that fits the child you know about (from available_sizes) and retry, or
+    ask them if you do not know the child.
     
     An outfit is one of each kind of thing: a top, a bottom, shoes, a coat.
     Never send two of the same kind - two shirts is not a look. Nor a piece for
@@ -791,7 +812,8 @@ async def show_size(size: str, reason: str, product: str = "", age: float = 0,
     reason: one short line for the shopper on why this size. product and the
     shopper's answers: the same ones you gave find_size. Then say the size and the
     reason in one line; the card is drawn for you. found=false with
-    not_sold_in_that_size: choose again from sizes_sold.
+    not_sold_in_that_size: choose again from sizes_sold. in_stock=false: the
+    right size is sold out - say so, and offer the nearest size that is in stock.
     """
     try:
         result = await size_finder.size_card(
@@ -885,7 +907,19 @@ def _for_the_model(found: dict) -> dict:
         if isinstance(found, dict) and isinstance(products, list):
             found["more_available"] = False
         return found
-    return {**found, "products": products[:SHELF_FOR_MODEL], "more_available": True}
+    # The model reads one page; "nothing under ₹5000" was once said from it
+    # while a ₹1700 piece sat further down. The cheapest of the WHOLE shelf
+    # ride along (as products, so their prices are localised like the rest).
+    priced = [p for p in products if isinstance(p.get("price_from"), (int, float))]
+    cheapest = sorted(priced, key=lambda p: p["price_from"])[:3]
+    keep = ("product_id", "variant_id", "title", "price_from", "currency", "in_this_size", "url", "image")
+    return {**found, "products": products[:SHELF_FOR_MODEL], "more_available": True,
+            "whole_shelf_count": len(products),
+            "cheapest_on_whole_shelf": [{**{k: p.get(k) for k in keep},
+                                         "variants": [{"variant_id": v.get("variant_id"), "price": v.get("price")}
+                                                      for v in p.get("variants") or []]}
+                                        for p in cheapest],
+            "note": "products is only the first page - never say it is everything, or the cheapest"}
 
 
 
@@ -939,10 +973,13 @@ def _in_their_colour(found: dict) -> dict:
     if not wanted or not isinstance(products, list) or not products:
         return found
 
+    # A whole word: "red" is not in "Embroidered", "tan" is not in "tartan".
+    word = re.compile(rf"\b{re.escape(wanted)}\b")
+
     def comes_in(product: dict) -> bool:
-        if wanted in (product.get("title") or "").lower():
+        if word.search((product.get("title") or "").lower()):
             return True
-        return any(wanted in (v.get("option") or "").lower()
+        return any(word.search((v.get("option") or "").lower())
                    for v in (product.get("variants") or []) if v.get("available"))
 
     theirs = [p for p in products if comes_in(p)]
@@ -952,8 +989,11 @@ def _in_their_colour(found: dict) -> dict:
         found["colour_matched"] = False
         return found
     found["colour_matched"] = True
-    found["products"] = theirs
-    found["count"] = len(theirs)
+    # Their colour first, the rest after - never dropped; each piece says which.
+    for p in products:
+        p["in_their_colour"] = comes_in(p)
+    found["products"] = theirs + [p for p in products if p not in theirs]
+    found["in_their_colour_count"] = len(theirs)
     found["also_here_in_other_colours"] = len(products) - len(theirs)
     return found
 
@@ -1231,5 +1271,8 @@ def _against_their_budget(data):
 
 
 for _t in CUSTOMER_SUPPORT_TOOLS:
+    # A malformed argument (age "5 years" for a number) goes back to the model to
+    # correct, instead of ending the whole reply in an error.
+    _t.handle_validation_error = True
     if _t.name in MARKET_PRICED and getattr(_t, "coroutine", None):
         _t.coroutine = _priced(_t.coroutine)

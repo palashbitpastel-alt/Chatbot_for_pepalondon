@@ -132,10 +132,24 @@ async def graphql(query: str, variables: dict | None = None, client: httpx.Async
         response.raise_for_status()
         return response.json()
 
-    try:
-        payload = await _post(client) if client is not None else await _post_with_new_client(_post)
-    except httpx.HTTPError as exc:
-        raise ShopifyError(f"Could not reach Shopify: {exc}") from exc
+    # Shopify's rate limit is a pause, not an outage: a throttled request did not
+    # run, so it is safe to ask again (twice, briefly) before giving up.
+    for attempt in range(3):
+        try:
+            payload = await _post(client) if client is not None else await _post_with_new_client(_post)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429 and attempt < 2:
+                await asyncio.sleep(1 + attempt)
+                continue
+            raise ShopifyError(f"Could not reach Shopify: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise ShopifyError(f"Could not reach Shopify: {exc}") from exc
+        throttled = any((e.get("extensions") or {}).get("code") == "THROTTLED"
+                        for e in payload.get("errors") or [] if isinstance(e, dict))
+        if throttled and attempt < 2:
+            await asyncio.sleep(1 + attempt)
+            continue
+        break
 
     if payload.get("errors"):
         messages = "; ".join(e.get("message", "unknown") for e in payload["errors"])
