@@ -616,7 +616,11 @@ async def _with_their_size(result: dict, size: str) -> None:
     keep = ("product_id", "variant_id", "title", "category", "for", "price_from", "currency",
             "in_this_size", "image", "url")
     result["their_size"] = size
-    result["products"] = picks + [{**{k: p.get(k) for k in keep}, "in_their_size": True}
+    # Each variant's own price rides along: the market pricing converts
+    # price_from from them, and without them the dollars went out labelled INR.
+    result["products"] = picks + [{**{k: p.get(k) for k in keep}, "in_their_size": True,
+                                   "variants": [{"variant_id": v.get("variant_id"), "price": v.get("price")}
+                                                for v in p.get("variants") or []]}
                                   for p in theirs[:SHELF_FOR_MODEL]
                                   if str(p["product_id"]) not in shown]
 
