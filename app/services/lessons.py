@@ -13,6 +13,7 @@ lesson is guidance about how to answer, never a script, and live store data
 """
 
 import logging
+from contextvars import ContextVar
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,17 +30,32 @@ RECALL_LIMIT = 3
 MIN_SCORE = 0.35
 MOMENT_CHARS = 400
 TEXT_CHARS = 1500
+# Off only while the replay test measures answers without the lessons.
+enabled: ContextVar[bool] = ContextVar("lessons_enabled", default=True)
 
 
-def moment(previous_reply: str | None, message: str) -> str:
+def reading(understood: dict | None) -> str:
+    """The model's reading of what the shopper wants ("Age: 5Y; Occasion: Birthday").
+
+    Filed and looked up alongside the words, so "a five-year-old" and "my 5 yo"
+    meet on the same reading even though they share no words."""
+    fields = (understood or {}).get("fields") or []
+    return "; ".join(f'{f["label"]}: {f["value"]}' for f in fields if f.get("value"))
+
+
+def moment(previous_reply: str | None, message: str, understood: dict | None = None) -> str:
     """The text a lesson is filed under and looked up by."""
     before = (previous_reply or "").strip()[-MOMENT_CHARS:]
     said = message.strip()[:MOMENT_CHARS]
-    return f"Assistant had said: {before}\nShopper: {said}" if before else f"Shopper: {said}"
+    text = f"Assistant had said: {before}\nShopper: {said}" if before else f"Shopper: {said}"
+    if read := reading(understood):
+        text += f"\nWants: {read}"
+    return text
 
 
 async def save(db: AsyncSession, *, message_id: int, session_id: str, previous_reply: str | None,
-               question: str, answer: str, verdict: str, correction: str = "", note: str = "") -> None:
+               question: str, answer: str, verdict: str, correction: str = "", note: str = "",
+               understood: dict | None = None) -> None:
     """File (or refile) the owner's verdict on one answer."""
     if verdict not in VERDICTS:
         raise ValueError("verdict must be good or bad")
@@ -47,7 +63,7 @@ async def save(db: AsyncSession, *, message_id: int, session_id: str, previous_r
     await rag._write_chunks(db, [{
         "kind": KIND,
         "ref_id": str(message_id),
-        "content": moment(previous_reply, question),
+        "content": moment(previous_reply, question, understood),
         "meta": {
             "verdict": verdict,
             "session_id": session_id,
@@ -87,10 +103,13 @@ def _example(n: int, meta: dict) -> str:
     return "\n".join(lines)
 
 
-async def recall(db: AsyncSession, previous_reply: str | None, message: str) -> str:
+async def recall(db: AsyncSession, previous_reply: str | None, message: str,
+                 understood: dict | None = None) -> str:
     """The owner's reviewed examples closest to this moment, as a briefing note."""
+    if not enabled.get():
+        return ""
     try:
-        hits = await rag.search(db, moment(previous_reply, message), kinds=[KIND],
+        hits = await rag.search(db, moment(previous_reply, message, understood), kinds=[KIND],
                                 limit=RECALL_LIMIT, min_score=MIN_SCORE)
     except Exception:  # noqa: BLE001 - a lesson must never cost the answer
         logger.warning("Could not look up reviewed answers", exc_info=True)

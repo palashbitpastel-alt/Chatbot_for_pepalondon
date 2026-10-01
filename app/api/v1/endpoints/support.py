@@ -872,7 +872,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # Answers the shop owner reviewed for moments like this one.
             last_reply = next((c for r, c in reversed(history) if r == "assistant"), None)
             async with AsyncSessionLocal() as db:
-                taught = await lessons.recall(db, last_reply, req.message)
+                taught = await lessons.recall(db, last_reply, req.message, turn_understood)
             if taught:
                 turn_briefing = f"{turn_briefing}\n{taught}" if turn_briefing else taught
             asking = with_context(req.message, turn_briefing)

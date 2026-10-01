@@ -1,6 +1,8 @@
 """The answer review page: the shop owner teaches the assistant by example.
 
 GET  /review                 the page itself (asks for the review key)
+POST /review/replay          start the replay test (see ``services.replay``)
+GET  /review/replay          the latest replay test result
 GET  /review/conversations   recent shopper conversations, each answer with its verdict
 POST /review/verdict         mark one answer good or wrong, with an optional correction
 DELETE /review/verdict/{id}  take a verdict back
@@ -22,7 +24,7 @@ from app.api.v1.endpoints.support import SESSION_PREFIX, _without_cards_note
 from app.core.config import settings
 from app.db.models import ChatMessage
 from app.db.session import AsyncSessionLocal
-from app.services import lessons
+from app.services import lessons, replay, understanding
 
 router = APIRouter(tags=["review"])
 
@@ -60,7 +62,8 @@ async def conversations(
         latest = func.max(ChatMessage.id).label("latest")
         sessions = (await db.execute(
             select(ChatMessage.session_id, latest)
-            .where(ChatMessage.session_id.like(f"{SESSION_PREFIX}%"))
+            .where(ChatMessage.session_id.like(f"{SESSION_PREFIX}%"),
+                   ChatMessage.session_id.notlike(f"{replay.SCRATCH_PREFIX}%"))
             .group_by(ChatMessage.session_id)
             .order_by(latest.desc())
             .limit(limit).offset(offset)
@@ -110,8 +113,17 @@ async def save_verdict(body: Verdict, x_review_key: str | None = Header(default=
         )).scalars().first()
         if body.verdict == "bad" and not (body.correction.strip() or body.note.strip()):
             raise HTTPException(status_code=422, detail="Say what was wrong or what it should have said.")
+        said = (await db.execute(
+            select(ChatMessage.content).where(ChatMessage.session_id == answer.session_id,
+                                              ChatMessage.role == "user", ChatMessage.id < answer.id)
+            .order_by(ChatMessage.id.asc()))).scalars().all()
+        try:
+            # The same reading of the shopper the chat had at that moment.
+            read = await understanding.understood(list(said))
+        except Exception:  # noqa: BLE001 - the words alone still file the lesson
+            read = None
         await lessons.save(
-            db, message_id=answer.id, session_id=answer.session_id,
+            db, message_id=answer.id, session_id=answer.session_id, understood=read,
             previous_reply=_without_cards_note(earlier.content) if earlier else None,
             question=question, answer=_without_cards_note(answer.content),
             verdict=body.verdict, correction=body.correction, note=body.note,
@@ -125,3 +137,27 @@ async def remove_verdict(message_id: int, x_review_key: str | None = Header(defa
     async with AsyncSessionLocal() as db:
         await lessons.forget(db, message_id)
     return {"removed": True}
+
+
+class ReplayRequest(BaseModel):
+    # "with": the assistant as shoppers get it. "both": also without the lessons.
+    mode: str = Field(default="with", pattern="^(with|both)$")
+
+
+@router.post("/review/replay")
+async def start_replay(body: ReplayRequest, x_review_key: str | None = Header(default=None)) -> dict:
+    """Replay every reviewed moment through the assistant as it is now."""
+    _check(x_review_key)
+    if not replay.start(body.mode):
+        raise HTTPException(status_code=409, detail="A replay test is already running.")
+    return {"started": True}
+
+
+@router.get("/review/replay")
+async def replay_result(x_review_key: str | None = Header(default=None)) -> dict:
+    _check(x_review_key)
+    result = await replay.last_result() or {"status": "never_run"}
+    if result.get("status") == "running" and not replay.running():
+        # The server restarted mid-run; nothing is still working on it.
+        result = {**result, "status": "interrupted"}
+    return result

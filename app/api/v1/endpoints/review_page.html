@@ -36,6 +36,16 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--b
 .fix label{font-size:13px;color:var(--muted)}
 .tag{font-size:12px;font-weight:600}
 .status{color:var(--muted);margin:12px 0}
+.replay{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:20px}
+.replay h2{font-size:16px;margin:0 0 4px}
+.replay .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.score{display:flex;gap:24px;flex-wrap:wrap;margin:8px 0;font-variant-numeric:tabular-nums}
+.score b{font-size:24px;display:block}
+.case{border-top:1px solid var(--line);padding:10px 0;white-space:normal}
+.case .q{font-weight:600}
+.case .r{color:var(--muted);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.pass{color:var(--good);font-weight:600}.fail{color:var(--bad);font-weight:600}
+details summary{cursor:pointer;color:var(--accent)}
 </style>
 </head>
 <body>
@@ -47,6 +57,16 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--b
     <input id="key" type="password" placeholder="Review key" autocomplete="current-password" required>
     <button class="primary">Open</button>
   </form>
+  <section class="replay" id="replay" hidden>
+    <h2>Replay test</h2>
+    <p class="lede" style="margin:0">Sends every answer you reviewed through the assistant as it is now, and checks the new answer against your verdict.
+      Run it after any change to make sure nothing that was right has broken.</p>
+    <div class="row">
+      <button class="primary" data-mode="with">Run test</button>
+      <button data-mode="both">Run with and without lessons</button>
+    </div>
+    <div id="replayOut"></div>
+  </section>
   <div class="filters" id="filters" hidden>
     <button data-f="all" aria-pressed="true">All answers</button>
     <button data-f="todo" aria-pressed="false">Not reviewed</button>
@@ -141,6 +161,7 @@ async function load(more) {
     if (!more) $("#list").replaceChildren();
     try { sessionStorage.setItem("reviewKey", key); } catch (e) {}
     $("#filters").hidden = false; $("#keyForm").hidden = true;
+    if ($("#replay").hidden) { $("#replay").hidden = false; loadReplay(); }
     for (const c of data.conversations) {
       const box = el("section", "convo");
       const first = c.messages[0] && c.messages[0].at;
@@ -160,6 +181,55 @@ async function load(more) {
     $("#keyForm").hidden = false;
   }
 }
+
+let polling = null;
+function scoreBox(label, sc) {
+  const d = el("div"); const b = el("b", null, sc ? `${sc.passed} / ${sc.total}` : "–");
+  d.append(b, document.createTextNode(label)); return d;
+}
+function verdictLine(label, r) {
+  const p = el("div", "r");
+  p.append(el("span", r.pass ? "pass" : "fail", r.pass ? "✓ pass" : "✗ fail"), document.createTextNode(` ${label}${r.reason}`));
+  return p;
+}
+function showReplay(d) {
+  const out = $("#replayOut"); out.replaceChildren();
+  const busy = d.status === "running";
+  document.querySelectorAll("#replay button").forEach(b => b.disabled = busy);
+  if (d.status === "never_run") { out.append(el("p", "status", "Not run yet. Review a few answers first.")); return; }
+  if (busy) { out.append(el("p", "status", `Running ${d.total} reviewed answers… this takes about ${Math.max(1, Math.ceil(d.total * (d.mode === "both" ? 2 : 1) * 20 / 3 / 60))} min.`)); return; }
+  if (d.status !== "finished") { out.append(el("p", "status", d.status === "interrupted" ? "The last run was interrupted by a server restart. Run it again." : `The last run failed: ${d.error || ""}`)); return; }
+  const sc = el("div", "score");
+  sc.append(scoreBox("answered your way now", d.with_lessons));
+  if (d.without_lessons) sc.append(scoreBox("without your lessons", d.without_lessons));
+  out.append(sc, el("p", "status", `Finished ${new Date(d.finished).toLocaleString()}`));
+  const det = el("details"); det.append(el("summary", null, "Each case"));
+  const fails = d.results.filter(r => !r.with_lessons.pass), ok = d.results.filter(r => r.with_lessons.pass);
+  for (const r of [...fails, ...ok]) {
+    const c = el("div", "case");
+    c.append(el("div", "q", `${r.verdict === "good" ? "Approved" : "Corrected"}: “${r.question}”`));
+    c.append(verdictLine(d.without_lessons ? "with lessons: " : "", r.with_lessons));
+    if (r.without_lessons) c.append(verdictLine("without lessons: ", r.without_lessons));
+    const a = el("details"); a.append(el("summary", null, "New answer"), el("div", "r", r.with_lessons.reply + (r.with_lessons.shown.length ? "\nShown: " + r.with_lessons.shown.join(", ") : "")));
+    c.append(a); det.append(c);
+  }
+  if (fails.length) det.open = true;
+  out.append(det);
+}
+async function loadReplay() {
+  try {
+    const d = await api("review/replay");
+    showReplay(d);
+    clearTimeout(polling);
+    if (d.status === "running") polling = setTimeout(loadReplay, 8000);
+  } catch (e) { $("#replayOut").replaceChildren(el("p", "status", e.message)); }
+}
+$("#replay").onclick = async e => {
+  const b = e.target.closest("button[data-mode]"); if (!b) return;
+  try { await api("review/replay", {method: "POST", body: JSON.stringify({mode: b.dataset.mode})}); }
+  catch (err) { $("#replayOut").replaceChildren(el("p", "status", err.message)); return; }
+  loadReplay();
+};
 
 $("#keyForm").onsubmit = e => { e.preventDefault(); key = $("#key").value.trim(); offset = 0; load(false); };
 $("#more").onclick = () => load(true);
