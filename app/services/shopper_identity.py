@@ -242,6 +242,11 @@ def set_avoid_colour(colours: str | None) -> object:
     return _avoid.set(tuple(n for n in names if n))
 
 
+def set_avoided_shades(shades: tuple[str, ...]) -> object:
+    """The turned-down colours widened to the store's own names for their shades."""
+    return _avoid.set(tuple(s.lower() for s in shades if s))
+
+
 def avoids_colour() -> tuple[str, ...]:
     return _avoid.get()
 

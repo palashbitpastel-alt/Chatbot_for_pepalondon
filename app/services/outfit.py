@@ -266,6 +266,9 @@ async def browse_catalogue() -> dict:
                 "price_to": float(max(prices)) if prices else None,
                 "in_stock": any(v["availableForSale"] for v in variants),
                 "colors": options.get("Color") or options.get("Colour") or [],
+                # Every option value whatever the store calls the option, for
+                # readers that must not assume an option is named "Color".
+                "option_values": sorted({v for vals in options.values() for v in vals or []}),
                 "sizes": options.get("Size") or [],
                 # Which colour comes in which size, and whether it is there to
                 # buy. Choosing the two apart asked for combinations the shop

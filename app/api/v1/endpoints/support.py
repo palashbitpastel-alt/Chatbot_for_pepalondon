@@ -29,7 +29,7 @@ from app.agent.customer_support_agent.shopper_context import (
     with_context,
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
-from app.services import audience, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
+from app.services import audience, colours, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import lessons, size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
@@ -752,6 +752,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "colour"), None))
             identity.set_avoid_colour(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "avoid_colour"), None))
+            if identity.avoids_colour():
+                identity.set_avoided_shades(await colours.shades_of(identity.avoids_colour()))
             identity.set_size(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
             identity.set_age(understood.get("age"))
