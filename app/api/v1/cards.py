@@ -7,12 +7,15 @@ takes it in one piece.
 """
 
 import json
+import logging
 import re
 
 from app.services import needs
 from app.services import shopper_identity as identity
 
 # Tools whose result a client can render as cards, and the key it arrives under.
+logger = logging.getLogger(__name__)
+
 CARD_TOOLS = {
     "search_products": "products",
     "browse_category": "products",
@@ -362,6 +365,26 @@ def _as_page(products: dict) -> dict:
     return page
 
 
+# The agent's own word on which products to draw, as the last line of its reply:
+# "[show: 9282580316316, 9227218190492]", "[show: all]" or "[show: none]".
+_SHOW_RE = re.compile(r"\s*\[\s*show\s*:\s*([^\]]*)\]\s*$", re.I)
+
+
+def split_show(reply: str) -> tuple[str, list[str] | str | None]:
+    """The reply without its [show: ...] line, and what that line chose:
+    a list of product ids, "all", or None when the agent gave no line."""
+    m = _SHOW_RE.search(reply or "")
+    if not m:
+        return reply, None
+    body = m.group(1).strip().lower()
+    text = (reply[:m.start()]).rstrip()
+    if body in ("all", "*"):
+        return text, "all"
+    if body in ("none", "", "-"):
+        return text, []
+    return text, [x for x in re.findall(r"\d{5,}", body)]
+
+
 def _not_a_shelf(products: dict, items: list[dict]) -> dict:
     """The same row, cut down to what the reply chose - no longer a whole shelf."""
     out = {**products, "items": items}
@@ -454,7 +477,33 @@ class CardCollector:
         self.products_whole = tool_name in WHOLE_RESULT_TOOLS
         self.products_fixed = tool_name in FIXED_RESULT_TOOLS
 
-    def finalise(self, reply: str, narrowed: bool = True, narrowed_past_size: bool | None = None) -> None:
+    def _use_declared(self, declared: list[str] | str | None) -> bool:
+        """Draw exactly the products the agent named in its [show: ...] line.
+        False when it gave no line, or named nothing it had looked up."""
+        if declared is None:
+            return False
+        if declared == "all":
+            if self.products is not None:
+                self.products_fixed = True
+            return True
+        if not declared:
+            self.products = None
+            return True
+        pool: dict[str, dict] = {}
+        currency = None
+        for _, result in self.product_results:
+            currency = currency or result.get("currency")
+            for item in result.get("items") or []:
+                pool.setdefault(str(item.get("product_id")), item)
+        picked = [pool[i] for i in dict.fromkeys(declared) if i in pool]
+        if not picked:
+            return False
+        self.products = {"items": picked, "currency": currency}
+        self.products_fixed = True
+        return True
+
+    def finalise(self, reply: str, narrowed: bool = True, narrowed_past_size: bool | None = None,
+                 declared: list[str] | str | None = None) -> None:
         """Reconcile the cards with the answer the shopper actually reads.
 
         A tool hands back everything it found - the whole catalogue, ten search
@@ -478,6 +527,12 @@ class CardCollector:
                 self.orders = {**self.orders, "orders": named}
         if self.outfit is not None or self.orders is not None:
             return
+        # The agent said which products to draw: that is the answer, no reading
+        # of its wording needed.
+        if self._use_declared(declared):
+            return
+        if self.products is not None:
+            logger.info("No [show: ...] line from the agent; matching cards to its wording")
         self._pick_products(reply)
         # Choices are never reconciled against the wording: the whole point is
         # that they do not depend on what the agent chose to say.

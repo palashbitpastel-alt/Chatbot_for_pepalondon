@@ -28,7 +28,7 @@ from app.agent.customer_support_agent.shopper_context import (
     describe,
     with_context,
 )
-from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, _card
+from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
 from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
@@ -836,6 +836,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             return
 
         reply = ""
+        declared = None
         cards = CardCollector()
         token = identity.set_current(shopper)
         session_token = identity.set_session(session_id)
@@ -869,7 +870,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                             # Collected now, sent once the reply exists - see finalise().
                             cards.take(event["name"], event.get("output"))
                     elif event["type"] == "final":
-                        reply = _without_cards_note(event["reply"])
+                        reply, declared = split_show(_without_cards_note(event["reply"]))
                 if attempt or used_tools or not await _named_without_looking(reply, req.cart):
                     break
                 logger.info("Session %s: reply named products without a lookup; asking again", session_id)
@@ -902,7 +903,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         narrowed = bool(asked_for & {"colour", "age", "size", "budget", "occasion", "style"}) or names_a_kind
         # A size shelf is only cut down by something beyond the size itself.
         past_size = bool(asked_for & {"colour", "budget", "occasion", "style"}) or names_a_kind
-        cards.finalise(reply, narrowed=narrowed, narrowed_past_size=past_size)
+        cards.finalise(reply, narrowed=narrowed, narrowed_past_size=past_size, declared=declared)
         cards.limit_products(requested)
         if req.cart is not None and not req.cart.items:
             cards.drop_empty_checkout()
