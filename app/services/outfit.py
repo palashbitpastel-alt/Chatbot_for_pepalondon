@@ -602,7 +602,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     # The agent does not always pass on what the shopper said; the preference
     # is held for the turn either way, so a suggestion never loses it.
     wanted = (colour or identity.wants_colour() or "").strip().lower()
-    age = int(age) if age else None
+    # int() turned "3 months" (0.25) into no age at all. Whole years stay whole.
+    age = (int(age) if float(age) == int(age) else float(age)) if age else None
 
     pool = [p for p in catalogue["products"] if p["in_stock"]]
     pool = _for_this_child(pool, audience)
