@@ -96,6 +96,17 @@ def keep_mentioned(items: list[dict], reply: str) -> list[dict]:
     "Leather T Bar Baby Shoes" in the reply, "leather" and "shoes" must not drag
     the Mary Janes in beside it.
     """
+    # A bulleted list is the agent's choice, line by line; the prose around it
+    # ("6 of 17 pieces in his size") is commentary, and "pieces" there was
+    # drawing the "Two Piece Set" card.
+    bullets = [line for line in reply.splitlines() if re.match(r"\s*[-*\u2022]\s+\S", line)]
+    if bullets:
+        # Bullets that name no product (a list of features) leave the prose in charge.
+        return _mentioned_in(items, "\n".join(bullets)) or _mentioned_in(items, reply)
+    return _mentioned_in(items, reply)
+
+
+def _mentioned_in(items: list[dict], reply: str) -> list[dict]:
     said = _words(reply)
     # Sentence by sentence, for the short words: "27 pieces in all" is not the
     # "All In One" - a short word only names a product beside another of its words.
