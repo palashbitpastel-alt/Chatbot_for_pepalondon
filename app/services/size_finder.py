@@ -228,6 +228,19 @@ def recommend(age: float | None = None, height_cm: float | None = None,
         recommended = CHART[target].label
     alternatives = (_neighbours(recommended, offered) if offered
                     else [CHART[i].label for i in (target - 1, target, target + 1) if 0 <= i <= TOP])
+    # Past the top of the chart the largest size is the nearest, not a fit:
+    # "12Y, true to size" for a 14 year old would send back a too-small piece.
+    top = CHART[TOP]
+    top_age = int(top.label[:-1]) if top.label.endswith("Y") and top.label[:-1].isdigit() else None
+    beyond = ((height_cm and height_cm > top.height_cm) or (chest_cm and chest_cm > top.chest_cm)
+              or (not measured and age and top_age is not None and age >= top_age + 1))
+    if beyond and target == TOP:
+        reasons = [f"Our sizes stop at {top.label}, cut for a child up to about {top.height_cm} cm tall "
+                   f"with a {top.chest_cm} cm chest. "
+                   + ("They are taller than that, so it would most likely be too small."
+                      if height_cm and height_cm > top.height_cm else
+                      "Most children their age are taller than that, so it is likely to be too small - "
+                      "check their height before buying.")]
     if not reasons:
         reasons.append("A true-to-size fit with a little room to grow.")
     band = CHART[target].label
@@ -238,6 +251,7 @@ def recommend(age: float | None = None, height_cm: float | None = None,
                      else f"Age {band[:-1]}",
         "fit": "close" if sized_up else fit,
         "fit_note": " ".join(reasons),
+        "beyond_our_sizes": bool(beyond and target == TOP),
         "warning": warning,
         "sized_up": sized_up,
         "alternatives": alternatives,
