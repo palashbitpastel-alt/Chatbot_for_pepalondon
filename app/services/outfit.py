@@ -667,10 +667,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     if wanted:
         coloured = [p for p in pool if _colour_match(p["colors"], wanted)]
         colour_matched = bool(coloured)
-        # Asked for navy, shown navy - padding the row with other colours would
-        # have the agent calling a powder-blue shirt navy.
+        # Their colour first, the rest after - never dropped. Keeping only the
+        # one blue dress made the agent say "the only dress in 5Y" when there
+        # were nine; each piece says whether it comes in the colour, and the
+        # agent decides what to show.
         if coloured:
-            pool = coloured
+            pool = coloured + [p for p in pool if p not in coloured]
 
     # Best fit first: the occasion the store's words actually place it at, then
     # a piece tagged for this child over one that merely suits either.

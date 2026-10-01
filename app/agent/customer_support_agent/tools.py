@@ -580,7 +580,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     say these are the nearest rather than calling them wedding pieces.
     category_note means we sell that kind but none suits this child - say exactly
     that ("our coats are girls' only at the moment") and never "we have no coats".
-    colour_matched=false means the same for colour. still_to_ask lists what is
+    colour_matched=false means the same for colour. With a colour, the pieces that
+    come in it are listed first (each piece's colour field is the matching shade,
+    null when it does not come in it) and the rest follow: never call a list of
+    them "all we have" - the others exist in other colours. still_to_ask lists what is
     missing - ask for the FIRST one only. Once age is known, build the whole look
     with build_outfit, using these handles - a budget is optional, never a reason
     to wait (budget_optional=true: build it, then say they can give one to adjust).
