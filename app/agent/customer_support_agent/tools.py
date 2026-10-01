@@ -1154,8 +1154,23 @@ def _priced(run):
             data = json.loads(out)
         except (TypeError, ValueError):
             return out
-        return json.dumps(await market.localize(data), ensure_ascii=False)
+        return json.dumps(_against_their_budget(await market.localize(data)), ensure_ascii=False)
     return wrapped
+
+
+def _against_their_budget(data):
+    """Say, beside each listed piece, whether it alone costs more than the budget
+    they gave. Only a fact for the agent; nothing is removed here."""
+    budget = identity.their_budget()
+    products = data.get("products") if isinstance(data, dict) else None
+    if not budget or not isinstance(products, list):
+        return data
+    data["their_budget"] = budget
+    for p in products:
+        price = p.get("price_from") if isinstance(p, dict) else None
+        if isinstance(price, (int, float)):
+            p["over_their_budget"] = price > budget
+    return data
 
 
 for _t in CUSTOMER_SUPPORT_TOOLS:

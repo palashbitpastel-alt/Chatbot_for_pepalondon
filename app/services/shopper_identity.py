@@ -231,6 +231,19 @@ def wants_size() -> str | None:
     return _size.get()
 
 
+# Their budget, in the money the shop is quoting, so a listing can say which
+# pieces alone cost more than it - the agent decides what to do with that.
+_budget: ContextVar[float | None] = ContextVar("their_budget", default=None)
+
+
+def set_budget(budget: float | None) -> object:
+    return _budget.set(budget if budget and budget > 0 else None)
+
+
+def their_budget() -> float | None:
+    return _budget.get()
+
+
 # The season they are shopping for. "It's summer now" has to keep the wool
 # coats out of the answer, the same way a colour keeps the wrong ones out.
 _season: ContextVar[str | None] = ContextVar("wants_season", default=None)

@@ -171,6 +171,21 @@ async def _names_a_kind(message: str) -> bool:
 _BUDGET_FIELD = re.compile(r"^(Under|Around)\s*(\D{0,4}?)\s*([\d,.]+)$")
 
 
+def _budget_amount(understood: dict, showing: str | None) -> float | None:
+    """The budget as a number in the shop's money, or None if it is in another."""
+    field = next((f for f in understood.get("fields") or [] if f["key"] == "budget"), None)
+    m = _BUDGET_FIELD.match(str((field or {}).get("value") or "").strip())
+    if not m:
+        return None
+    sign = (m.group(2) or "").strip()
+    if sign and sign != (needs.symbol(showing) or "").strip():
+        return None
+    try:
+        return float(m.group(3).replace(",", ""))
+    except ValueError:
+        return None
+
+
 async def _budget_in_their_money(understood: dict, showing: str | None) -> None:
     """Rewrite the Understood panel's budget into the money this shop is quoting.
 
@@ -734,6 +749,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "season"), None))
             await _budget_in_their_money(
                 understood, req.context.currency if req.context else None)
+            identity.set_budget(_budget_amount(
+                understood, req.context.currency if req.context else None))
             if understood["fields"]:
                 yield _sse("understood", understood)
 
