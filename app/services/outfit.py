@@ -604,6 +604,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     wanted = (colour or identity.wants_colour() or "").strip().lower()
     # int() turned "3 months" (0.25) into no age at all. Whole years stay whole.
     age = (int(age) if float(age) == int(age) else float(age)) if age else None
+    # Like the colour above: what they told us holds even when it is not passed on.
+    if age is None:
+        age = identity.child_age()
 
     pool = [p for p in catalogue["products"] if p["in_stock"]]
     pool = _for_this_child(pool, audience)

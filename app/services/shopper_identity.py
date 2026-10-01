@@ -244,6 +244,20 @@ def their_budget() -> float | None:
     return _budget.get()
 
 
+# The child's age in years, as they told it in the chat. Held like the colour:
+# the agent does not always pass it on, and a look built without it put baby
+# booties in a ten year old's wedding outfit.
+_age: ContextVar[int | None] = ContextVar("child_age", default=None)
+
+
+def set_age(age: int | None) -> object:
+    return _age.set(age if age and age > 0 else None)
+
+
+def child_age() -> int | None:
+    return _age.get()
+
+
 # The season they are shopping for. "It's summer now" has to keep the wool
 # coats out of the answer, the same way a colour keeps the wrong ones out.
 _season: ContextVar[str | None] = ContextVar("wants_season", default=None)

@@ -588,8 +588,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
                                              category=category, limit=6 if category else 4)
-        if size.strip():
-            await _with_their_size(result, size.strip())
+        # Their size from the chat when the agent did not pass one on.
+        size = size.strip() or (identity.wants_size() or "")
+        if size:
+            await _with_their_size(result, size)
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("suggest_pieces", exc)

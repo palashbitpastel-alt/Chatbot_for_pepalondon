@@ -746,6 +746,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "colour"), None))
             identity.set_size(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
+            identity.set_age(understood.get("age"))
             identity.set_season(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "season"), None))
             await _budget_in_their_money(
