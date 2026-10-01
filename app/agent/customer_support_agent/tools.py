@@ -573,8 +573,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     Returns in-stock pieces, best fit first - name each with its price. Given a
     size, the pieces sold in the child's own size (their_size) come back too, and
     every piece says in_their_size true/false: offer the ones they can wear now and
-    choose among them what answers the request (clothes for "a dress", not a
-    dummy). A piece with in_their_size=false is one to grow into - never the answer
+    choose among them what answers the request - a kind they named, or the whole
+    range when they asked generally. A piece with in_their_size=false is one to grow into - never the answer
     on its own. worn_for says what the store's own words place a piece at.
     occasion_matched=false means nothing in stock is written for that occasion:
     say these are the nearest rather than calling them wedding pieces.
@@ -777,8 +777,8 @@ async def browse_in_size(size: str) -> str:
     say plainly that nothing comes in that size and offer the nearest.
     Name the pieces with their prices - a count on its own ("8 pieces come in
     12Y") leaves the shopper reading a number with unnamed cards beside it. When
-    the size serves a wider request ("clothes for a 3 month old"), name only the
-    pieces that answer it - not a dummy or a bib that merely shares the size.
+    they asked for a kind of piece, name the ones of that kind; when they asked
+    generally, name the range, accessories included.
     """
     try:
         return json.dumps(_for_the_model(await shelf("browse_in_size", size)), ensure_ascii=False)
