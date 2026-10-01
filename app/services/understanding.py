@@ -21,8 +21,10 @@ TIMEOUT_SECONDS = 8
 
 _PROMPT = """You read a shopper's messages to a children's clothing shop and note what they want.
 Return ONLY a JSON object with these keys, each a short string or null when not said:
-- "for": "Girl", "Boy" or "Baby" - the person the purchase is FOR (the recipient). "A gift
-  for my daughter's friend, he turns 5" is for a Boy. Baby only for a baby whose sex is not given.
+- "for": "Girl", "Boy" or "Baby" - the person the purchase is FOR (the recipient). Baby only
+  for a baby whose sex is not given. Only when it is clear: if the messages leave it open or
+  contradict themselves ("my daughter ... her friend ... a gift for him"), "for" is null.
+- "unsure": "for" when who it is for is unclear or contradictory, else null.
 - "age": the recipient's age as "5 years" or "3 months" ("a newborn" is "0 months").
 - "occasion": e.g. "Birthday", "Wedding", "School", "Christmas".
 - "season": "Summer" or "Winter" when they say so.
@@ -45,7 +47,10 @@ messages say who this child is.{remembered}"""
 def _fields(found: dict) -> dict:
     raw_count = found.get("count")
     count = raw_count if isinstance(raw_count, int) and 0 < raw_count <= 12 else None
+    unsure = str(found.get("unsure") or "").strip().lower() or None
     found = {k: str(v).strip() for k, v in found.items() if k in needs.FIELD_ORDER and v and str(v).strip()}
+    if unsure == "for":
+        found.pop("for", None)
     # A colour they turned down is no longer the colour they want.
     if found.get("avoid_colour") and found.get("colour", "").lower() == found["avoid_colour"].lower():
         found.pop("colour")
@@ -66,6 +71,7 @@ def _fields(found: dict) -> dict:
                    for k in needs.FIELD_ORDER if k in found],
         "age": age_years,
         "count": count,
+        "unsure": unsure,
     }
 
 

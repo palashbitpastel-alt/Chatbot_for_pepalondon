@@ -861,6 +861,11 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 turn_briefing = f"{turn_briefing}\n{note}" if turn_briefing else note
             # How many they asked to see, as the model read it - never an age
             # mistaken for a count ("my daughter is 4" once meant 4 items).
+            # Who it is for is unclear or contradictory: ask, never guess.
+            if (turn_understood or {}).get("unsure") == "for":
+                ask_who = ("[Who this is for is unclear or contradictory in what they wrote. Ask one "
+                           "short question - is it for a boy or a girl? - before showing any products.]")
+                turn_briefing = f"{turn_briefing}\n{ask_who}" if turn_briefing else ask_who
             if n := (turn_understood or {}).get("count"):
                 ask = f"[They asked for exactly {n} item(s): choose and name exactly {n}, no more]"
                 turn_briefing = f"{turn_briefing}\n{ask}" if turn_briefing else ask
