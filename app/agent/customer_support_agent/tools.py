@@ -729,24 +729,52 @@ async def build_outfit(items: str | list, budget: float = 0) -> str:
 @tool
 async def find_size(product: str = "", age: float = 0, height_cm: float = 0,
                     chest_cm: float = 0, usual_size: str = "") -> str:
-    """Recommend ONE size for a child, from what the shopper told you.
+    """The facts for choosing a child's size - you choose it, then call show_size.
 
-    Use for "what size", "will it fit", a height or measurement, or "she usually
-    wears 5-6Y". product: the piece they are viewing or named ("this" = the one
-    they are viewing); empty for a general answer. Fill only what they gave you
-    (0 / "" otherwise): age in years, height_cm, chest_cm, usual_size like "5-6Y".
-    Returns recommended (e.g. "6-7Y"), fit_note (why), alternatives. The
-    storefront draws the size card itself: say the size and the fit note in one
-    line. found=false: ask for their age and height, in one question.
+    Use for "what size", "will it fit", a height or measurement, "she usually
+    wears 5-6Y", or "pick the best size". product: the piece they are viewing or
+    named ("this" = the one they are viewing); empty for a general answer. Fill
+    only what they gave you or told you earlier (0 / "" otherwise): age in years
+    (months as a fraction), height_cm, chest_cm, usual_size like "5-6Y".
+    Returns the sizes this piece is really sold in (and which are in stock), the
+    size chart (how tall and broad each size is cut for, and a typical EU shoe
+    size at each age), the piece's own description and tags (how it is cut -
+    "smocked", "runs small", "relaxed"), and what the shopper told us.
+    Choose ONE size from sizes_sold, as a good shop assistant would: measurements
+    beat age, a close cut near the top of a size goes up one, a roomy one does not,
+    shoes go by the EU number, and an in-stock size beats a sold-out one. Then call
+    show_size with it and a one-line reason - that draws the size card. found=false:
+    ask for their age and height, in one question.
     """
     try:
-        result = await size_finder.for_product(
+        result = await size_finder.size_facts(
             product or None, age=age or None, height_cm=height_cm or None,
             chest_cm=chest_cm or None, usual_size=usual_size or None,
         )
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("find_size", exc)
+
+
+@tool
+async def show_size(size: str, reason: str, product: str = "", age: float = 0,
+                    height_cm: float = 0, chest_cm: float = 0, usual_size: str = "") -> str:
+    """Show the size YOU chose (after find_size) as the size card.
+
+    size: exactly as find_size listed it in sizes_sold ("5Y", "28", "10UK/11US/28EU").
+    reason: one short line for the shopper on why this size. product and the
+    shopper's answers: the same ones you gave find_size. Then say the size and the
+    reason in one line; the card is drawn for you. found=false with
+    not_sold_in_that_size: choose again from sizes_sold.
+    """
+    try:
+        result = await size_finder.size_card(
+            product or None, size, reason, age=age or None, height_cm=height_cm or None,
+            chest_cm=chest_cm or None, usual_size=usual_size or None,
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("show_size", exc)
 
 
 
@@ -1126,6 +1154,7 @@ CUSTOMER_SUPPORT_TOOLS = [
     build_outfit,
     complete_the_look,
     find_size,
+    show_size,
     check_order_status,
     request_order_change,
     confirm_order_change,
@@ -1145,7 +1174,7 @@ CUSTOMER_SUPPORT_TOOLS = [
 MARKET_PRICED = {
     "search_products", "browse_in_size", "browse_category", "get_best_sellers", "browse_catalogue",
     "suggest_pieces", "build_outfit", "complete_the_look", "compare_products", "recommend_for_me",
-    "product_details", "add_to_cart", "find_size",
+    "product_details", "add_to_cart", "find_size", "show_size",
 }
 
 

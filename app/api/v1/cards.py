@@ -28,7 +28,7 @@ CARD_TOOLS = {
     "build_outfit": "outfit",
     "complete_the_look": "outfit",
 
-    "find_size": "size",
+    "show_size": "size",
     "get_my_order_history": "orders",
     "check_order_status": "orders",
     # Not a card - a set of buttons. Same idea though: the shopper should be
@@ -305,7 +305,7 @@ def cards_from(tool_name: str, output: str | None) -> dict | None:
             "multi_buy": data.get("multi_buy"),
         }
 
-    if tool_name == "find_size":
+    if tool_name == "show_size":
         # The quiz result as it stands: the size, why, and the product it is for.
         return data if data.get("found") else None
 

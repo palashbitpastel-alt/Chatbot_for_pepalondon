@@ -305,3 +305,104 @@ async def for_product(product_ref: str | None = None, **answers) -> dict:
     elif product_ref and result.get("found"):
         result["product_not_found"] = product_ref
     return result
+
+
+# ── For the assistant: the facts, not the answer ──────────────────────────
+# The chat's agent chooses the size itself. It is handed what a good shop
+# assistant would look at - the sizes this piece is really sold in, the size
+# chart, what the piece's own description says about its cut, and what the
+# shopper told us - and then draws its choice with size_card().
+
+def _product_sizes(product: dict) -> list[dict]:
+    seen: dict[str, bool] = {}
+    for v in (product.get("variants") or {}).get("nodes") or []:
+        size = outfit._option_value(v, "Size")
+        if size:
+            seen[size] = seen.get(size, False) or bool(v.get("availableForSale"))
+    return [{"size": k, "in_stock": v} for k, v in seen.items()]
+
+
+def _description(product: dict) -> str:
+    text = re.sub(r"<[^>]+>", " ", product.get("descriptionHtml") or product.get("description") or "")
+    return " ".join(text.split())[:900]
+
+
+async def size_facts(product_ref: str | None = None, age: float | None = None,
+                     height_cm: float | None = None, chest_cm: float | None = None,
+                     usual_size: str | None = None) -> dict:
+    """Everything needed to choose a size, with no choice made."""
+    answers = {"age_years": age, "height_cm": height_cm, "chest_cm": chest_cm, "usual_size": usual_size}
+    told = {k: v for k, v in answers.items() if v}
+    product = await find_product(product_ref)
+    out: dict = {
+        "found": bool(told),
+        "shopper_told_us": told,
+        "size_chart": [
+            {"size": b.label, "fits_height_up_to_cm": b.height_cm, "fits_chest_up_to_cm": b.chest_cm,
+             "typical_shoe_eu_at_this_age": b.shoe_eu}
+            for b in CHART
+        ],
+    }
+    if product:
+        out["product"] = {
+            "title": product.get("title"),
+            "sizes_sold": _product_sizes(product),
+            "tags": product.get("tags") or [],
+            "description": _description(product),
+        }
+    elif product_ref:
+        out["product_not_found"] = product_ref
+    if not told:
+        out["still_to_ask"] = ["age", "height"]
+    return out
+
+
+async def size_card(product_ref: str | None, size: str, reason: str, age: float | None = None,
+                    height_cm: float | None = None, chest_cm: float | None = None,
+                    usual_size: str | None = None) -> dict:
+    """The size card for the size the agent chose. Checked only for being real:
+    a size this piece is not sold in comes back as not found, with the ones it is."""
+    product = await find_product(product_ref)
+    size = (size or "").strip()
+    if not size:
+        return {"found": False, "reason": "no_size"}
+    sizes = _product_sizes(product) if product else []
+    offered = [s["size"] for s in sizes]
+    if product and offered:
+        exact = next((o for o in offered if o.strip().lower() == size.lower()), None)
+        if exact is None:
+            return {"found": False, "reason": "not_sold_in_that_size", "asked": size, "sizes_sold": sizes}
+        size = exact
+    result = {
+        "found": True,
+        "recommended": size,
+        "fit_note": (reason or "").strip(),
+        "fit": "true",
+        "warning": None,
+        "sized_up": False,
+        "alternatives": _neighbours(size, offered) if offered else [size],
+        "age_label": f"Age {age:g}" if age else "",
+        "answers": {
+            "age": f"{age:g} years" if age else None,
+            "height": f"{height_cm:g} cm" if height_cm else None,
+            "chest": f"{chest_cm:g} cm" if chest_cm else None,
+            "usual_size": usual_size or None,
+        },
+        "sizes_offered": offered,
+    }
+    if product:
+        result["product"] = {
+            "title": product.get("title"),
+            "handle": product.get("handle"),
+            "product_id": product.get("legacyResourceId"),
+            "image": product_image(product),
+            "url": product_url(product),
+            "variants": [
+                {"variant_id": v.get("legacyResourceId"),
+                 "size": outfit._option_value(v, "Size"),
+                 "price": v.get("price"),
+                 "available": v.get("availableForSale")}
+                for v in (product.get("variants") or {}).get("nodes") or []
+            ],
+        }
+    return result
