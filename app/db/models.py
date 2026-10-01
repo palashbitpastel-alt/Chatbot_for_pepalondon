@@ -26,6 +26,9 @@ class ChatMessage(Base):
     session_id: Mapped[str] = mapped_column(String(64), index=True)
     role: Mapped[str] = mapped_column(String(10))  # user|assistant
     content: Mapped[str] = mapped_column(String)
+    # Where the shopper was (country, currency) - so a reviewed turn can be
+    # replayed in the same money. Shopper messages only.
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

@@ -45,6 +45,8 @@ Decide whether the NEW answer handles the moment the way the owner wants:
   products and prices may differ - the catalogue changes.
 - If the owner marked the original WRONG: the new answer must not make that mistake and should
   do what the owner's correction / note asks. Products and prices may differ.
+Prices may also be in a different currency from the original (the replay may not know the
+shopper's country): never fail an answer over currency or price amounts alone.
 Return ONLY JSON: {"pass": true|false, "reason": "one short sentence"}."""
 
 
@@ -89,6 +91,7 @@ async def _cases() -> list[dict]:
                 "message_id": answer_id,
                 "history": [(m.role, m.content) for m in before[:-1]],
                 "question": before[-1].content,
+                "where": next((m.context for m in reversed(before) if m.role == "user" and m.context), None),
                 "verdict": meta.get("verdict"),
                 "original": meta.get("answer", ""),
                 "correction": meta.get("correction", ""),
@@ -118,6 +121,7 @@ def _shown(done: dict) -> list[str]:
 
 async def _ask(case: dict, with_lessons: bool) -> dict:
     """Send the case's message through the real chat endpoint in a scratch session."""
+    from app.agent.customer_support_agent.shopper_context import PageContext
     from app.api.v1.endpoints.support import SupportChatRequest, support_chat
 
     session_id = SCRATCH_PREFIX + uuid.uuid4().hex[:20]
@@ -126,7 +130,10 @@ async def _ask(case: dict, with_lessons: bool) -> dict:
         await db.commit()
     switch = lessons.enabled.set(with_lessons)
     try:
-        response = await support_chat(SupportChatRequest(message=case["question"], session_id=session_id))
+        # In the shopper's own money where we know it; older turns kept no record.
+        where = PageContext(**case["where"]) if case.get("where") else None
+        response = await support_chat(SupportChatRequest(message=case["question"], session_id=session_id,
+                                                         context=where))
         chunks = []
 
         async def read() -> None:

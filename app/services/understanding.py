@@ -24,7 +24,9 @@ Return ONLY a JSON object with these keys, each a short string or null when not 
 - "for": "Girl", "Boy" or "Baby" - the person the purchase is FOR (the recipient). Baby only
   for a baby whose sex is not given. Only when it is clear: if the messages leave it open or
   contradict themselves ("my daughter ... her friend ... a gift for him"), "for" is null.
-- "unsure": "for" when who it is for is unclear or contradictory, else null.
+- "unsure": "for" when who it is for is unclear or contradictory, else null. Shopping for
+  several children whom they name clearly ("twins, a boy and a girl") is not unclear:
+  "for" and "unsure" are both null.
 - "age": the recipient's age as "5 years" or "3 months" ("a newborn" is "0 months").
 - "occasion": e.g. "Birthday", "Wedding", "School", "Christmas".
 - "season": "Summer" or "Winter" when they say so.

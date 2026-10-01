@@ -231,6 +231,21 @@ def wants_colour() -> str | None:
     return _colour.get()
 
 
+# The colours they turned down ("she doesn't like pink"), as the model read them,
+# so a product that also comes in other colours is shown in one of those.
+_avoid: ContextVar[tuple[str, ...]] = ContextVar("avoids_colour", default=())
+
+
+def set_avoid_colour(colours: str | None) -> object:
+    names = [" ".join(c.strip().lower().split())
+             for c in (colours or "").replace(" and ", ",").replace("/", ",").split(",")]
+    return _avoid.set(tuple(n for n in names if n))
+
+
+def avoids_colour() -> tuple[str, ...]:
+    return _avoid.get()
+
+
 # The size the conversation has settled on ("Size 8Y" in the Understood panel).
 # Without it a look falls back to the first size a piece is sold in, which is
 # the smallest - a six year old was dressed in 12M and handed a dummy.

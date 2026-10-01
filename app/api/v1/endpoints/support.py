@@ -388,11 +388,11 @@ def _without_cards_note(text: str) -> str:
     return text if at == -1 else text[:at].rstrip()
 
 
-async def _save_turn(session_id: str, message: str, reply: str) -> None:
+async def _save_turn(session_id: str, message: str, reply: str, where: dict | None = None) -> None:
     async with AsyncSessionLocal() as db:
         db.add_all(
             [
-                ChatMessage(session_id=session_id, role="user", content=message),
+                ChatMessage(session_id=session_id, role="user", content=message, context=where or None),
                 ChatMessage(session_id=session_id, role="assistant", content=reply),
             ]
         )
@@ -750,6 +750,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 (f["value"] for f in understood["fields"] if f["key"] == "for"), None))
             identity.set_colour(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "colour"), None))
+            identity.set_avoid_colour(next(
+                (f["value"] for f in understood["fields"] if f["key"] == "avoid_colour"), None))
             identity.set_size(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
             identity.set_age(understood.get("age"))
@@ -949,7 +951,10 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # here and the agent copied it into its next reply; the widget now sends
         # the cards on screen with every message instead (cards_on_screen).
         try:
-            await _save_turn(session_id, req.message, _without_cards_note(reply))
+            await _save_turn(session_id, req.message, _without_cards_note(reply),
+                                 {k: v for k, v in {"country": req.context.country,
+                                                    "currency": req.context.currency}.items() if v}
+                                 if req.context else None)
         except Exception:  # noqa: BLE001
             logger.exception("Could not save the turn for session %s", session_id)
         for name, payload in drawn.items():

@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 # (products/campaigns/orders/ops_tasks/expenses) was dropped when the app
 # stopped persisting Shopify data - see services.shopify_store. Add entries
 # here again if a future *persisted* table needs a new column.
-ADDED_COLUMNS: dict[str, dict[str, str]] = {}
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "chat_messages": {"context": "JSON"},
+}
 
 
 def _existing_columns(sync_conn) -> dict[str, set[str]]:

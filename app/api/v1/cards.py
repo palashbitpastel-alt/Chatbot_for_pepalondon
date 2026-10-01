@@ -197,11 +197,27 @@ def _in_their_colour(item: dict) -> dict:
     choosing the right one here fixes all three.
     """
     wanted = identity.wants_colour()
+    avoided = identity.avoids_colour()
     variants = item.get("variants")
-    if not wanted or not isinstance(variants, list):
+    if not (wanted or avoided) or not isinstance(variants, list):
         return item
-    match = next((v for v in variants
-                  if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
+
+    def parts(variant: dict) -> list[str]:
+        return [p.strip().lower() for p in str(variant.get("option") or "").split("/") if p.strip()]
+
+    def is_avoided(variant: dict) -> bool:
+        return any(a in p for a in avoided for p in parts(variant))
+
+    match = None
+    if wanted:
+        match = next((v for v in variants
+                      if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
+    # "She doesn't like pink": a piece that also comes in other colours opens in
+    # one of them - the same size where it can - with that colour's picture.
+    if not match and avoided and any(a in str(item.get("option") or "").lower() for a in avoided):
+        current = set(p.strip().lower() for p in str(item.get("option") or "").split("/"))
+        others = [v for v in variants if v.get("available") and not is_avoided(v)]
+        match = max(others, key=lambda v: len(current & set(parts(v))), default=None)
     if not match:
         return item
     return {**item,
