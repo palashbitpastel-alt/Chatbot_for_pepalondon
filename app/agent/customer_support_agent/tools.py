@@ -323,6 +323,10 @@ async def product_details(product: str, colour: str = "", size: str = "") -> str
     of?", "do you have it in red 5/6Y?". product: its name as they said it ("this" =
     the one they are viewing). colour / size: pass whatever the shopper named, exactly
     as they said it, whenever they name or pick one ("select red and 5/6Y").
+    In this shop a child's age the shopper already gave IS their size: if they told
+    you earlier in the chat ("my 3 month old", "she's 5"), pass that age as size
+    ("3 months", "5 years") every time you show a piece, even when they did not
+    repeat it - the card then opens with that size already picked for them.
     Answer only from what it returns; if it is not there, say the product page does
     not say and offer our team. Never guess a care instruction or a fabric.
 
