@@ -199,8 +199,10 @@ def _in_their_colour(item: dict) -> dict:
     wanted = identity.wants_colour()
     avoided = identity.avoids_colour()
     variants = item.get("variants")
-    if not (wanted or avoided) or not isinstance(variants, list):
+    if not (wanted or avoided):
         return item
+    if not isinstance(variants, list):
+        return _colour_by_name(item, wanted, avoided)
 
     def parts(variant: dict) -> list[str]:
         return [p.strip().lower() for p in str(variant.get("option") or "").split("/") if p.strip()]
@@ -230,6 +232,24 @@ def _in_their_colour(item: dict) -> dict:
             "option": match.get("option") or item.get("option"),
             "image": match.get("image") or item.get("image"),
             "url": match.get("url") or item.get("url")}
+
+
+def _colour_by_name(item: dict, wanted: str | None, avoided: tuple[str, ...]) -> dict:
+    """The same choice for a piece that lists its colours by name only (an
+    outfit suggestion): the card is told which colour to open on, and the
+    storefront picks that variant and its photo."""
+    names = [str(c) for c in item.get("colors") or [] if c]
+    if len(names) < 2:
+        return item
+    pick = next((c for c in names if wanted and wanted in c.lower()), None)
+    if not pick and avoided and any(a in names[0].lower() for a in avoided):
+        pick = next((c for c in names if not any(a in c.lower() for a in avoided)), None)
+    if not pick:
+        return item
+    size = item["in_this_size"] if isinstance(item.get("in_this_size"), list) \
+        and len(item["in_this_size"]) == 1 else []
+    chosen = [c for c in (item.get("chosen_options") or size) if c not in names]
+    return {**item, "chosen_options": [pick, *chosen]}
 
 
 def _card(item: dict) -> dict:
