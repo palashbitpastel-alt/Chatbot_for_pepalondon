@@ -30,7 +30,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
 from app.services import audience, colours, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
-from app.services import lessons, size_finder, store_profile, suggestions, understanding
+from app.services import lessons, service_health, size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
@@ -919,9 +919,25 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 # Take the unlooked-up draft off the shopper's screen.
                 yield _sse("reset", {})
                 asking = f"{asking}\n\n{_LOOK_IT_UP}"
-        except Exception:
+        except Exception as exc:
             logger.exception("Support chat failed for session %s", session_id)
-            yield _sse("error", {"message": "Sorry — something went wrong. Please try again."})
+            # The real reason for the owner; for the shopper an honest line and
+            # what still works without the assistant - never "try again" when
+            # trying again cannot help.
+            kind = service_health.classify(exc)
+            service_health.record(kind, exc)
+            code = service_health.shopper_code(kind)
+            failed: dict = {"message": service_health.SHOPPER_MESSAGES[code], "code": code,
+                            "retry": code in ("ai_busy", "unexpected")}
+            if code == "ai_unavailable":
+                failed["offer_size"] = True
+                try:
+                    found = await shopify_storefront.collections(
+                        settings.SUPPORT_WELCOME_COLLECTION_LIMIT, _welcome_handles())
+                    failed["collections"] = found.get("collections") or []
+                except Exception:  # noqa: BLE001 - the message alone still helps
+                    logger.warning("Could not load collections for the fallback", exc_info=True)
+            yield _sse("error", failed)
             return
         finally:
             identity.reset(token)

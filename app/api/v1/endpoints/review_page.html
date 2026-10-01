@@ -36,6 +36,9 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--b
 .fix label{font-size:13px;color:var(--muted)}
 .tag{font-size:12px;font-weight:600}
 .status{color:var(--muted);margin:12px 0}
+.status-line{padding:10px 14px;border-radius:10px;margin:0 0 16px;border:1px solid var(--line);background:var(--card)}
+.status-line.bad{border-color:var(--bad);background:var(--bad-bg);color:var(--bad)}
+.status-line.good{border-color:var(--good);background:var(--good-bg);color:var(--good)}
 .replay{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:20px}
 .replay h2{font-size:16px;margin:0 0 4px}
 .replay .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
@@ -57,6 +60,7 @@ details summary{cursor:pointer;color:var(--accent)}
     <input id="key" type="password" placeholder="Review key" autocomplete="current-password" required>
     <button class="primary">Open</button>
   </form>
+  <p class="status-line" id="health" hidden></p>
   <section class="replay" id="replay" hidden>
     <h2>Replay test</h2>
     <p class="lede" style="margin:0">Sends every answer you reviewed through the assistant as it is now, and checks the new answer against your verdict.
@@ -161,7 +165,7 @@ async function load(more) {
     if (!more) $("#list").replaceChildren();
     try { sessionStorage.setItem("reviewKey", key); } catch (e) {}
     $("#filters").hidden = false; $("#keyForm").hidden = true;
-    if ($("#replay").hidden) { $("#replay").hidden = false; loadReplay(); }
+    if ($("#replay").hidden) { $("#replay").hidden = false; loadReplay(); loadHealth(); }
     for (const c of data.conversations) {
       const box = el("section", "convo");
       const first = c.messages[0] && c.messages[0].at;
@@ -182,6 +186,19 @@ async function load(more) {
   }
 }
 
+async function loadHealth() {
+  const box = $("#health");
+  try {
+    const d = await api("review/status");
+    const ai = d.ai || {};
+    const last = d.last_failure;
+    box.hidden = false;
+    box.className = "status-line " + (ai.ok === false ? "bad" : ai.ok ? "good" : "");
+    box.textContent = ai.ok ? `AI assistant: working${ai.balance ? " · balance " + ai.balance : ""}`
+      : `AI assistant: ${ai.reason || "status unknown"}${ai.balance ? " (balance " + ai.balance + ")" : ""}`;
+    if (last) box.textContent += ` · Last failed chat ${last.minutes_ago} min ago: ${last.reason}`;
+  } catch (e) { box.hidden = true; }
+}
 let polling = null;
 function scoreBox(label, sc) {
   const d = el("div"); const b = el("b", null, sc ? `${sc.passed} / ${sc.total}` : "–");

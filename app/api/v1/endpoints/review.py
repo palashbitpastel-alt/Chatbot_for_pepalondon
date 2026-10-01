@@ -24,7 +24,7 @@ from app.api.v1.endpoints.support import SESSION_PREFIX, _without_cards_note
 from app.core.config import settings
 from app.db.models import ChatMessage
 from app.db.session import AsyncSessionLocal
-from app.services import colours, lessons, replay, understanding
+from app.services import colours, lessons, replay, service_health, understanding
 
 router = APIRouter(tags=["review"])
 
@@ -172,3 +172,10 @@ async def shades(colour: str = Query(..., min_length=2, max_length=40),
     started = time.monotonic()
     found = await colours.shades_of((colour.strip().lower(),))
     return {"colour": colour, "shades": list(found), "seconds": round(time.monotonic() - started, 1)}
+
+
+@router.get("/review/status")
+async def status(x_review_key: str | None = Header(default=None)) -> dict:
+    """Whether the AI can answer right now, and why the last chat failed."""
+    _check(x_review_key)
+    return {"ai": await service_health.ai_status(), "last_failure": service_health.last_failure()}
