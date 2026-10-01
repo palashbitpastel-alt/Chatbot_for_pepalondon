@@ -735,6 +735,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # once and cached, so every product card says whose it is.
         try:
             await audience.ensure()
+            # The store's colour names, read in the background so a turned-down
+            # colour covers its shades when it is first said.
+            colours.warm()
         except Exception:  # noqa: BLE001 - exact tag names are the fallback
             logger.warning("Could not prepare the audience tags", exc_info=True)
         turn_understood = None
