@@ -207,7 +207,11 @@ def _card(item: dict) -> dict:
         "title": item.get("title"),
         "option": item.get("option"),
         # The colour/size the shopper asked for, so the card opens with them picked.
-        "chosen_options": item.get("chosen_options"),
+        # A size lookup says which of a piece's sizes matched the one asked for
+        # ("3 months" -> its "3M"); that is their size on this piece too.
+        "chosen_options": item.get("chosen_options") or (
+            item["in_this_size"] if isinstance(item.get("in_this_size"), list)
+            and len(item["in_this_size"]) == 1 else None),
         # Tools name this differently: a unit price, a "from" price, or a plain one.
         "price": next(
             (item[k] for k in ("unit_price", "price_from", "price") if item.get(k) is not None),
