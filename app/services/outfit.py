@@ -954,7 +954,15 @@ def _range_note(stock: list[dict], audience: str | None, age: int | None) -> dic
                  default=None)
     if oldest is None or oldest >= age:
         return None
-    return {"asked_for_age": age, "oldest_we_make": oldest, "for": audience}
+    found = {"asked_for_age": age, "oldest_we_make": oldest, "for": audience}
+    # How big that largest size is, from the size chart - so whether it could
+    # still fit this child is judged from a measurement, not from the label.
+    from app.services.size_finder import CHART, INDEX
+    band = INDEX.get(f"{oldest}Y")
+    if band is not None:
+        found["largest_cut_for_height_cm"] = CHART[band].height_cm
+        found["largest_cut_for_chest_cm"] = CHART[band].chest_cm
+    return found
 
 
 def _size_for_age(sizes: list[str], age: int | None, oldest: int | None,
