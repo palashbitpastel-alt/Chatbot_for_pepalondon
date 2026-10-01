@@ -128,7 +128,8 @@ def describe(
     if context and context.cards_on_screen:
         shown = "; ".join(f"{n}. {str(t)[:120]}" for n, t in enumerate(context.cards_on_screen, 1))
         lines.append(f"Product cards on their screen under your last reply, in the order they see them: "
-                     f"{shown}. \"The second one\" or \"that one\" points at these cards.")
+                     f"{shown}. \"The second one\" or \"that one\" points at these cards; \"the first thing you showed me\" or "
+                     "\"earlier\" means the earliest products in the conversation, not these cards.")
     if context and context.on_screen:
         kind = {"look": "a look you built", "checklist": "your checklist, waiting for their OK"}.get(
             context.on_screen_kind or "", "pieces")

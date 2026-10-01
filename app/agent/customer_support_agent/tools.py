@@ -1266,8 +1266,13 @@ def _priced(run):
 def _against_their_budget(data):
     """Say, beside each listed piece, whether it alone costs more than the budget
     they gave. Only a fact for the agent; nothing is removed here."""
-    budget = identity.their_budget()
     products = data.get("products") if isinstance(data, dict) else None
+    # Nightwear marked on every listing, not only suggestions: a "night dress"
+    # was offered among cheaper party dresses from a plain search.
+    for p in products if isinstance(products, list) else []:
+        if isinstance(p, dict) and p.get("title"):
+            p["sleepwear"] = occasions.is_sleepwear(p["title"])
+    budget = identity.their_budget()
     if not budget or not isinstance(products, list):
         return data
     data["their_budget"] = budget
