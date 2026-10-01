@@ -40,6 +40,13 @@ query MultiItemTiers {
 """
 
 _cache: tuple[float, list[dict]] | None = None
+# Why there are no tiers, for the store owner: "ok", "none_set_up" or the reason
+# the discounts could not be read (usually the app lacks read_discounts).
+_status = "not_read"
+
+
+def status() -> str:
+    return _status
 
 
 def _parse(nodes: list[dict]) -> list[dict]:
@@ -63,14 +70,16 @@ def _parse(nodes: list[dict]) -> list[dict]:
 async def tiers() -> list[dict]:
     """The store's multi-item tiers, smallest first. [] when none are set up or
     the store cannot be read - the chat then simply shows no offer."""
-    global _cache
+    global _cache, _status
     if _cache and time.monotonic() - _cache[0] < TIER_CACHE_SECONDS:
         return _cache[1]
     try:
         data = await graphql(TIERS_QUERY)
         ladder = _parse(data["automaticDiscountNodes"]["nodes"])
+        _status = "ok" if ladder else "none_set_up"
     except (ShopifyError, KeyError) as exc:
         logger.warning("Could not read the store's automatic discounts: %s", exc)
+        _status = f"cannot_read: {str(exc)[:200]}"
         ladder = _cache[1] if _cache else []
     _cache = (time.monotonic(), ladder)
     return ladder

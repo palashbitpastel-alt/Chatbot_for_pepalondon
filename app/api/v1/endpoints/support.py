@@ -555,7 +555,8 @@ async def support_topup(
     try:
         catalogue = await outfit.browse_catalogue()
         stock = [p for p in catalogue["products"] if p["in_stock"] and p["price_from"]]
-        small = sorted(stock, key=lambda p: (0 if p["category"] in ("Accessory", "Socks") else 1, p["price_from"]))
+        # The smallest step up to the next tier: the least expensive pieces in stock.
+        small = sorted(stock, key=lambda p: p["price_from"])
         picks = []
         for p in small[:limit]:
             # The + button adds straight to the bag, so each pick carries the
@@ -583,7 +584,7 @@ async def support_topup(
 async def support_offer() -> dict:
     """The store's multi-item tiers, read from its own automatic discounts.
     Empty when none are set up - the widget then shows no offer."""
-    return {"tiers": await multi_buy.tiers()}
+    return {"tiers": await multi_buy.tiers(), "status": multi_buy.status()}
 
 
 class StateRequest(BaseModel):
