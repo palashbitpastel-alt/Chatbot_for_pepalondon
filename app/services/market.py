@@ -184,13 +184,20 @@ def _money(value) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.01"), ROUND_HALF_UP))
 
 
+def _variant_priced(obj: dict) -> bool:
+    """Whether a variant's own price is what this entry shows. A product's
+    details carry a variant id but quote price_from - priced from the product,
+    or it went out in dollars labelled as rupees."""
+    return bool(obj.get("variant_id")) and any(obj.get(k) is not None for k in VARIANT_PRICE_KEYS)
+
+
 def _walk(obj, variants: set, products: set) -> None:
     if isinstance(obj, dict):
         if obj.get("variant_id") and any(obj.get(k) is not None for k in VARIANT_PRICE_KEYS):
             variants.add(str(obj["variant_id"]))
         # A card with no variant of its own - a welcome pick, a saved item - is
         # priced from its product instead.
-        if obj.get("product_id") and not obj.get("variant_id") and (
+        if obj.get("product_id") and not _variant_priced(obj) and (
                 obj.get("price_from") is not None or obj.get("price") is not None):
             products.add(str(obj["product_id"]))
         for v in obj.values():
@@ -237,7 +244,7 @@ def _apply(obj, vp: dict, pp: dict, state: dict) -> None:
             if obj.get("line_total") is not None:
                 obj["line_total"] = _money(Decimal(str(amount)) * int(obj.get("quantity") or 1))
         pid = str(obj.get("product_id") or "")
-        if pid in pp and not obj.get("variant_id"):
+        if pid in pp and not _variant_priced(obj):
             low = pp[pid]["minVariantPricing"]["price"]
             high = pp[pid]["maxVariantPricing"]["price"]
             if obj.get("price_from") is not None:
