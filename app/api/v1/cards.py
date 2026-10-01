@@ -69,6 +69,9 @@ _NOISE = {
 }
 # Used only when a title has no word of its own to be recognised by.
 _MENTION_RATIO = 0.5
+# A distinctive word this short ("all", "one", "set") is too common in plain
+# prose to name a product on its own.
+SHORT_WORD = 5
 
 
 def _stem(word: str) -> str:
@@ -94,7 +97,15 @@ def keep_mentioned(items: list[dict], reply: str) -> list[dict]:
     the Mary Janes in beside it.
     """
     said = _words(reply)
+    # Sentence by sentence, for the short words: "27 pieces in all" is not the
+    # "All In One" - a short word only names a product beside another of its words.
+    sentences = [_words(part) for part in re.split(r"[.!?\n]+", reply) if part.strip()]
     title_words = [(item, _words(item.get("title") or "")) for item in items]
+
+    def named_by(word: str, words: set[str]) -> bool:
+        if len(word) >= SHORT_WORD:
+            return word in said
+        return any(word in part and len(part & words) > 1 for part in sentences)
 
     frequency: dict[str, int] = {}
     for _, words in title_words:
@@ -107,7 +118,7 @@ def keep_mentioned(items: list[dict], reply: str) -> list[dict]:
             continue
         distinctive = {w for w in words if frequency.get(w, 1) == 1}
         if distinctive:
-            if distinctive & said:
+            if any(named_by(w, words) for w in distinctive):
                 kept.append(item)
         elif len(words & said) / len(words) >= _MENTION_RATIO:
             # Nothing sets this title apart, so fall back to how much of it appears.
