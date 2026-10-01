@@ -88,6 +88,8 @@ class PageContext(BaseModel):
     on_screen: list[OnScreenItem] | None = Field(default=None, max_length=20)
     # "look" (a look you built) or "checklist" (lined up, waiting for their OK).
     on_screen_kind: str | None = Field(default=None, max_length=20)
+    # The product cards under the newest reply, in the order the shopper sees them.
+    cards_on_screen: list[str] | None = Field(default=None, max_length=20)
 
 
 def _money(minor: int | None, currency: str | None) -> str | None:
@@ -120,6 +122,10 @@ def describe(
             place = f" in {context.country}" if context.country else ""
             lines.append(f"Prices are shown to them in {shown_in}{place}")
 
+    if context and context.cards_on_screen:
+        shown = "; ".join(f"{n}. {str(t)[:120]}" for n, t in enumerate(context.cards_on_screen, 1))
+        lines.append(f"Product cards on their screen under your last reply, in the order they see them: "
+                     f"{shown}. \"The second one\" or \"that one\" points at these cards.")
     if context and context.on_screen:
         kind = {"look": "a look you built", "checklist": "your checklist, waiting for their OK"}.get(
             context.on_screen_kind or "", "pieces")
