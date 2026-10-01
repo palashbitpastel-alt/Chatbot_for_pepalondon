@@ -847,6 +847,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         screen_token = identity.set_screen(
             req.context.cards_on_screen if req.context else None,
             req.context.viewing_product if req.context else None)
+        checklist_token = identity.set_checklist(
+            [i.variant_id for i in req.context.on_screen or [] if i.ticked]
+            if req.context and req.context.on_screen_kind == "checklist" else None)
         saved_token = identity.set_saved(req.saved)
         # What the shopper has actually written, so that nothing can be put in
         # their bag unless the agent quotes the words that asked for it. Their
@@ -918,6 +921,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset_session(session_token)
             identity.reset_cart(cart_token)
             identity.reset_screen(screen_token)
+            identity.reset_checklist(checklist_token)
             identity.reset_saved(saved_token)
             identity.reset_said(said_token)
             market.reset_country(country_token)

@@ -163,6 +163,23 @@ def on_screen() -> tuple:
     return _screen.get()
 
 
+# The checklist waiting for their OK, as the variants they left ticked. Adding
+# exactly those is them confirming it, not a guess to be checked again.
+_checklist: ContextVar[frozenset[str]] = ContextVar("checklist", default=frozenset())
+
+
+def set_checklist(variant_ids) -> object:
+    return _checklist.set(frozenset(str(v) for v in variant_ids or [] if v))
+
+
+def reset_checklist(token) -> None:
+    _checklist.reset(token)
+
+
+def checklist() -> frozenset[str]:
+    return _checklist.get()
+
+
 def set_cart(cart) -> object:
     return _cart.set(cart)
 

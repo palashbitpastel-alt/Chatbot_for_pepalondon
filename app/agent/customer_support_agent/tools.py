@@ -69,7 +69,8 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
 
     confirm_first: true whenever any colour or size in this add was picked by you or
       a tool rather than by the shopper - a look you built or sized from their child's
-      age, rows on screen marked "options picked by you" - even when they said yes to it. Nothing
+      age, rows of a LOOK on screen marked "options picked by you" - even when they said yes to
+      the look. Once YOUR CHECKLIST is on their screen, their yes is the confirmation. Nothing
       goes in: the storefront shows them a checklist of exactly these pieces with
       their options, where they can untick, change colour or size per piece, and
       tap "Add all as shown". Say in one line what you have lined up and ask whether
@@ -77,9 +78,10 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
       on the checklist too (on_the_checklist_to_choose) with its choices open - say
       they can pick it there, rather than asking for it in a separate question. Leave it false when they named every option
       themselves ("add the red one in 4/6Y") - asking again only slows them down.
-      When they then say "keep it" / "add them" / "yes", add what is ON SCREEN as
-      the storefront context lists it - their ticked rows, by variant_id, with the
-      options they changed - and confirm_first false.
+      When the checklist is on their screen and they say "keep it" / "add them" / "yes" /
+      "please add", add what is ON SCREEN as the storefront context lists it - their
+      ticked rows, by variant_id, with the options they changed - and confirm_first
+      false. Never show the same checklist again: that loops and nothing is bought.
 
     items: [{"product": "<name or handle>", "color": "Pink", "size": "5Y", "quantity": 1}]
       "this"/"it" is the product they are viewing. For variants a tool already
@@ -125,7 +127,14 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
     # The shopper sees the exact piece and size in a checklist and confirms it -
     # nothing goes in the bag on a guess.
     cards, viewing = identity.on_screen()
-    if not confirm_first and len(cards) > 1 and not viewing:
+    # Adding exactly the ticked rows of the checklist on their screen is them
+    # saying yes to it: showing the same checklist again only loops.
+    ticked = identity.checklist()
+    confirming = bool(ticked) and bool(items) and all(
+        isinstance(i, dict) and str(i.get("variant_id") or "") in ticked for i in items)
+    if confirming:
+        confirm_first = False
+    elif not confirm_first and len(cards) > 1 and not viewing:
         confirm_first = True
     # A checklist the shopper confirms is their choice, so it skips this.
     unchosen = []
