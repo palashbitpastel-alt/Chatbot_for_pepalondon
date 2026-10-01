@@ -184,6 +184,8 @@ def _card(item: dict) -> dict:
         "variant_id": item.get("variant_id"),
         "title": item.get("title"),
         "option": item.get("option"),
+        # The colour/size the shopper asked for, so the card opens with them picked.
+        "chosen_options": item.get("chosen_options"),
         # Tools name this differently: a unit price, a "from" price, or a plain one.
         "price": next(
             (item[k] for k in ("unit_price", "price_from", "price") if item.get(k) is not None),

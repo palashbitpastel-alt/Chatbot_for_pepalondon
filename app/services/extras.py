@@ -198,7 +198,10 @@ async def product_details(name: str, colour: str = "", size: str = "") -> dict:
         if requested.get("available"):
             # The card opens on the very variant they asked for, at its own price.
             out.update(variant_id=requested["variant_id"], price_from=requested["price"],
-                       option=" / ".join(x for x in (requested["colour"], requested["size"]) if x))
+                       option=" / ".join(x for x in (requested["colour"], requested["size"]) if x),
+                       # Only what they named: "blue" alone must not pick a size for them.
+                       chosen_options=[x for x, asked in ((requested["colour"], colour), (requested["size"], size))
+                                       if x and asked.strip()])
     return out
 
 
