@@ -41,11 +41,12 @@ Return ONLY a JSON object with these keys, each a short string or null when not 
   until they ask for a different kind.
 - "count": how many items their LATEST message asks to see, as a number ("show me 2 jackets"
   -> 2), else null. Never an age, a size, a price or a number of children.
-The latest message wins when they change something. A different child from the one before
-(another age) replaces the earlier one's size and colour, and "for" is null unless the
-messages say who this child is. A size that cannot be the earlier child's (a baby size after a
-14 year old, or the reverse) is a different child too: drop the earlier child's age, occasion,
-colour and style unless the newest messages say them again.{remembered}"""
+The latest message wins when they change something.
+A DIFFERENT CHILD: when the newest messages are about another child than before (another age,
+or a size that could not fit the earlier child - a baby size after a 14 year old), describe ONLY
+the newest child. Everything said about the earlier child is dropped - its age, size, occasion,
+colour, style, category and budget - unless the newest messages say it again. "for" then comes
+from the newest messages alone ("for my boy, 3 months" -> "Boy"), null if they do not say.{remembered}"""
 
 
 def _fields(found: dict) -> dict:
