@@ -19,6 +19,7 @@ import time
 from urllib.parse import quote
 
 from app.core.config import settings
+from app.services import audience
 from app.services.shopify_client import ShopifyError, graphql, store_domain
 
 logger = logging.getLogger(__name__)
@@ -365,7 +366,6 @@ def _public_variant(v: dict, node: dict) -> dict:
     }
 
 
-AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
 
 
 def _public_product(node: dict, currency: str) -> dict:
@@ -384,8 +384,7 @@ def _public_product(node: dict, currency: str) -> dict:
         # Who the store says a piece is for. Without it on every card, a shopper
         # who told us "my daughter" was handed boys' trousers out of a mixed
         # collection, because nothing downstream could tell them apart.
-        "for": [name for name in AUDIENCE_TAGS
-                if name.lower() in {t.strip().lower() for t in node.get("tags") or []}],
+        "for": audience.of(node.get("tags"), node.get("legacyResourceId")),
         "variants": [_public_variant(v, node) for v in variants],
     }
 
@@ -1474,15 +1473,17 @@ def _audience_category(category: str) -> dict | None:
     words = [w for w in re.findall(r"[a-z]+", (category or "").lower()) if w not in _AUDIENCE_FILLER]
     if len(words) != 1 or words[0] not in _AUDIENCE_WORDS:
         return None
-    tag = _AUDIENCE_WORDS[words[0]]
+    group = _AUDIENCE_WORDS[words[0]]
+    # This store's own tags for that child, as the model read them.
+    tags = audience.tags_for(group)
     return {
-        "id": tag.lower(),
-        "name": tag,
+        "id": group.lower(),
+        "name": group,
         "kind": "audience",
         "image": None,
-        "url": f"https://{store_domain()}/collections/all/{tag.lower()}",
+        "url": f"https://{store_domain()}/collections/all/{tags[0] if tags else group.lower()}",
         "product_count": None,
-        "filter": f'tag:"{tag}"',
+        "filter": "(" + " OR ".join(f'tag:"{_quoted(t)}"' for t in (tags or [group])) + ")",
     }
 
 

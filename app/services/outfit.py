@@ -18,6 +18,7 @@ import re
 import time
 from decimal import Decimal, InvalidOperation
 
+from app.services import audience as audience_reader
 from app.services import occasions, parts, suits
 from app.services.shopify_client import ShopifyError, graphql
 from app.services.shopify_storefront import (
@@ -163,34 +164,9 @@ async def _active_products(handles: list[str] | None = None) -> list[dict]:
     return found
 
 
-# The store tags a piece Boys, Girls or Baby. Without that on the catalogue the
-# agent can only guess from the title, and it guesses badly: asked for a
-# 9-year-old boy it offered the one dress that happened to run to 10Y.
-AUDIENCE_TAGS = ("Boys", "Girls", "Baby")
-
-
-# Pieces the store's own words place on one child or the other, where it has
-# not tagged them. A big bow hairband arrived in a ten year old boy's outfit
-# because nothing said whose it was.
-HERS = ("hairband", "headband", "bow", "frill", "ruffle", "tutu", "ballet", "pinafore",
-        "mary jane", "maryjane", "floral", "scallop", "tulle", "lace", "broderie", "petal")
-HIS = ("waistcoat", "bow tie", "necktie")
-# What the store files a piece under says as much as its name does. A blouse is
-# a girl's, whatever the tags say - and these products carry no audience tag at
-# all, only "white" and "in-stock".
-HER_TYPES = ("blouse", "dress", "skirt", "pinafore", "tights")
-HIS_TYPES = ("waistcoat", "blazer")
-
-
-def _named_for(title: str, kind: str | None, audience: str) -> bool:
-    """Whether a piece's own name or product type puts it on the other child."""
-    lowered = (title or "").lower()
-    filed = (kind or "").strip().lower()
-    if audience == "Boys":
-        return any(w in lowered for w in HERS) or any(t in filed for t in HER_TYPES)
-    if audience == "Girls":
-        return any(w in lowered for w in HIS) or any(t in filed for t in HIS_TYPES)
-    return False
+# Who a piece is for (Boys, Girls, Baby) is read by the model from the store's
+# own tags, and from the name of a piece that carries no such tag - see
+# app/services/audience.py. No tag names or garment word lists live here.
 
 
 # What a piece is made of and for, in the store's own words. A wool coat in a
@@ -240,20 +216,14 @@ def _for_this_child(pool: list[dict], audience: str | None) -> list[dict]:
     """
     if not audience:
         return pool
-    kept = [p for p in pool if not p["for"] or audience in p["for"]]
-    other = {"Girls": "boy", "Boys": "girl"}.get(audience)
-    if other:
-        kept = [p for p in kept if other not in (p.get("title") or "").lower()]
-    # Untagged, but the name says whose it is - only where the store itself has
-    # not tagged the piece for this child.
-    return [p for p in kept if audience in (p.get("for") or [])
-            or not _named_for(p.get("title") or "", p.get("category"), audience)]
+    # "for" is the model's reading of the store's tags or of the piece's name;
+    # empty means it suits any child.
+    return [p for p in pool if not p["for"] or audience in p["for"]]
 
 
-def _suits(tags: list[str] | None) -> list[str]:
-    """Who a piece is for, from the store's own tags. Empty means either."""
-    lowered = {t.strip().lower() for t in tags or []}
-    return [name for name in AUDIENCE_TAGS if name.lower() in lowered]
+def _suits(tags: list[str] | None, product_id=None) -> list[str]:
+    """Who a piece is for, as the model read the store. Empty means either."""
+    return audience_reader.of(tags, product_id)
 
 
 # The whole catalogue is read by several steps of one reply (the tools, the
@@ -288,7 +258,8 @@ async def browse_catalogue() -> dict:
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
                 "role": _category(node["title"], None),
-                "for": _suits(node.get("tags")),
+                "for": [],
+                "_tags": node.get("tags") or [],
                 "occasions": occasions.of(node.get("title"), " ".join(node.get("tags") or []),
                                           node.get("description")),
                 "price_from": float(min(prices)) if prices else None,
@@ -308,6 +279,13 @@ async def browse_catalogue() -> dict:
                 "url": product_url(node),
             }
         )
+    # Who each piece is for, read by the model from this store's tags, or from
+    # the piece's name where it carries none.
+    await audience_reader.ensure()
+    await audience_reader.learn([{"product_id": p["product_id"], "title": p["title"],
+                                  "category": p["category"], "tags": p["_tags"]} for p in products])
+    for product in products:
+        product["for"] = audience_reader.of(product.pop("_tags"), product["product_id"])
     by_category: dict[str, list[str]] = {}
     for product in products:
         by_category.setdefault(product["category"], []).append(product["handle"])
@@ -1428,8 +1406,7 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         # trousers. The first of a kind stays; a second is left out, and said so.
         piece = {"title": product["title"],
                  "category": product.get("productType"),
-                 "for": [t for t in AUDIENCE_TAGS
-                         if t.lower() in {x.strip().lower() for x in (product.get("tags") or [])}],
+                 "for": audience_reader.of(product.get("tags"), product.get("legacyResourceId")),
                  "sizes": _options_of(product).get("Size") or []}
         if for_whom and not _for_this_child([piece], for_whom):
             left_out.append({"title": product["title"], "reason": "for_another_child",

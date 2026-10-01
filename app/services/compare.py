@@ -11,6 +11,7 @@ import difflib
 import html
 import re
 
+from app.services import audience as audience_reader
 from app.services.shopify_client import graphql
 from app.services.shopify_storefront import collection_tree, product_image, product_url, shop_info
 from app.services.suggestions import plural
@@ -54,7 +55,6 @@ _FABRIC_RE = re.compile(
 # Case-sensitive on purpose: "made in Spain using leather" must stop at Spain.
 _MADE_IN_RE = re.compile(r"\b[Mm]ade in ([A-Z][a-z]+(?: [A-Z][a-z]+)?)")
 _VERSUS_RE = re.compile(r"\s+(?:vs\.?|versus)\s+", re.I)
-_AUDIENCE = ("Girls", "Boys", "Baby")
 
 
 def _stem(word: str) -> str:
@@ -175,7 +175,7 @@ def _facts(node: dict, currency: str) -> dict:
     variants = node["variants"]["nodes"]
     buyable = next((v for v in variants if v.get("availableForSale")), variants[0] if variants else {})
     tags = {t.lower() for t in node.get("tags") or []}
-    audience = [a for a in _AUDIENCE if a.lower() in tags]
+    audience = audience_reader.of(node.get("tags"), node.get("legacyResourceId"))
     size_range = (sizes[0] if len(sizes) == 1 else f"{sizes[0]} - {sizes[-1]}") if sizes else None
     fabric = _fabric(highlights, description)
     made_in = _made_in(highlights, description)

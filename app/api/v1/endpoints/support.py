@@ -29,7 +29,7 @@ from app.agent.customer_support_agent.shopper_context import (
     with_context,
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
-from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
+from app.services import audience, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
 from app.services import size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
@@ -429,6 +429,7 @@ async def support_more(req: ShelfRequest) -> dict:
     country = market.set_country(req.country)
     showing = market.set_showing(req.currency)
     try:
+        await audience.ensure()
         found = await market.localize(await tools.shelf(req.tool, req.arg))
     except ShopifyError:
         logger.warning("Could not fetch more of shelf %s %s", req.tool, req.arg, exc_info=True)
@@ -730,6 +731,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
 
         # What they have asked for so far - age, occasion, budget, size - drawn by
         # the widget as the "Understood" panel and the "Searching for" chips.
+        # Which of this store's tags mean Boys, Girls or Baby - read by the model
+        # once and cached, so every product card says whose it is.
+        try:
+            await audience.ensure()
+        except Exception:  # noqa: BLE001 - exact tag names are the fallback
+            logger.warning("Could not prepare the audience tags", exc_info=True)
         turn_understood = None
         if req.message.strip():
             # Everything they have told us in this chat, not just what the model
