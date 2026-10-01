@@ -604,17 +604,20 @@ async def _with_their_size(result: dict, age: float) -> None:
         found = await shelf("browse_in_size", size)
     except (ShopifyError, KeyError, ValueError):
         return
-    theirs = [p for p in (found or {}).get("products") or [] if p.get("handle")]
+    theirs = [p for p in (found or {}).get("products") or [] if p.get("product_id")]
     if not theirs:
         return
-    fits = {p["handle"] for p in theirs}
+    fits = {str(p["product_id"]) for p in theirs}
     picks = result.get("products") or []
     for p in picks:
-        p["in_their_size"] = p.get("handle") in fits
-    shown = {p.get("handle") for p in picks}
+        p["in_their_size"] = str(p.get("product_id")) in fits
+    shown = {str(p.get("product_id")) for p in picks}
+    keep = ("product_id", "variant_id", "title", "category", "for", "price_from", "currency",
+            "in_this_size", "image", "url")
     result["their_size"] = size
-    result["products"] = picks + [{**p, "in_their_size": True} for p in theirs[:SHELF_FOR_MODEL]
-                                  if p["handle"] not in shown]
+    result["products"] = picks + [{**{k: p.get(k) for k in keep}, "in_their_size": True}
+                                  for p in theirs[:SHELF_FOR_MODEL]
+                                  if str(p["product_id"]) not in shown]
 
 
 @tool
