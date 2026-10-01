@@ -1060,19 +1060,14 @@ async def complete_the_look(product: str, size: str | None = None,
     # has settled on, and only then the piece's own first size - which is its
     # smallest, and dressed a six year old as a baby.
     # Nobody has said how old the child is, and this piece is sold across
-    # several ages: guessing dressed a shopper's daughter as a toddler without
-    # ever saying so. Ask, rather than pick for them.
+    # several ages. The look is still shown - that is what they asked to see -
+    # but every piece sold in several sizes is left for them to size: a guess
+    # once dressed a shopper's daughter as a toddler without saying so.
+    sizes_unknown = False
     if not (size or identity.wants_size()):
         spread = sorted({a for x in (anchor["sizes"] or []) if (a := _age_of(x)) is not None}) \
             or sorted(set(_numbers_in(anchor["sizes"] or [])))
-        if len(spread) > 1:
-            return {
-                "found": False,
-                "reason": "need_age",
-                "product": {"handle": anchor["handle"], "title": anchor["title"]},
-                "sizes_offered": anchor["sizes"],
-                "ask": "how old the child is",
-            }
+        sizes_unknown = len(spread) > 1
 
     size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
     ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
@@ -1197,6 +1192,20 @@ async def complete_the_look(product: str, size: str | None = None,
     look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
     if not picked and (note := _range_note(stock, audience, age)):
         look["nothing_else_fits"] = note
+    if sizes_unknown:
+        sized = {p["handle"]: len(p.get("sizes") or []) for p in stock}
+        open_rows = []
+        for item in look.get("outfit") or []:
+            if sized.get(item.get("handle"), 0) > 1:
+                item["variant_id"] = None
+                item["option"] = None
+                item["needs"] = ["size"]
+                open_rows.append(item["title"])
+        look["cart_items"] = [{"variant_id": c["variant_id"], "quantity": c["quantity"]}
+                              for c in look.get("outfit") or []]
+        if open_rows:
+            look["sizes_to_choose"] = open_rows
+            look["ask"] = "how old the child is"
     look["found"] = bool(look.get("outfit"))
     look["anchor"] = {"handle": anchor["handle"], "title": anchor["title"], "category": anchor["category"]}
     look["size"] = size
