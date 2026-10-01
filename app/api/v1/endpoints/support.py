@@ -388,6 +388,15 @@ def _without_repeats(turns: list[tuple[str, str]], asking: str) -> list[tuple[st
     return kept
 
 
+_CARDS_NOTE = "[Cards shown under this reply, in order:"
+
+
+def _without_cards_note(text: str) -> str:
+    """A saved reply as the shopper saw it: without the agent's note of its cards."""
+    at = (text or "").find(_CARDS_NOTE)
+    return text if at == -1 else text[:at].rstrip()
+
+
 async def _save_turn(session_id: str, message: str, reply: str) -> None:
     async with AsyncSessionLocal() as db:
         db.add_all(
@@ -635,7 +644,7 @@ async def support_history(session_id: str = Query(..., min_length=10, max_length
                 .limit(60)
             )
         ).scalars().all()
-    turns = [(m.role, m.content) for m in rows]
+    turns = [(m.role, _without_cards_note(m.content)) for m in rows]
     return {
         "session_id": session_id,
         "messages": [{"role": r, "content": c} for r, c in turns],
@@ -878,7 +887,6 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             market.reset_country(country_token)
             market.reset_showing(showing_token)
 
-        await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still
         # gets the cards without having to follow the stream.
         # Has the shopper narrowed things (colour, age, size, budget) - in this
@@ -896,7 +904,16 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         cards.limit_products(requested)
         if req.cart is not None and not req.cart.items:
             cards.drop_empty_checkout()
-        for name, payload in cards.as_dict().items():
+        drawn = cards.as_dict()
+        # The agent only ever reads its own words back, never the cards drawn
+        # under them - so "I like the second one" pointed at nothing. The cards,
+        # in order, go into its memory of this turn (and out of /history).
+        shown = [i.get("title") for key in ("products", "outfit")
+                 for i in ((drawn.get(key) or {}).get("items") or []) if i.get("title")]
+        memory = reply if not shown else (
+            f"{reply}\n\n{_CARDS_NOTE} " + "; ".join(f"{n}. {t}" for n, t in enumerate(shown, 1)) + "]")
+        await _save_turn(session_id, req.message, memory)
+        for name, payload in drawn.items():
             yield _sse(name, payload)
         # The widget carries these out, in order: add these variants to the bag,
         # take them to checkout. Repeated in `done` for a client that only reads

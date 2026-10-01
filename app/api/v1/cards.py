@@ -9,6 +9,7 @@ takes it in one piece.
 import json
 import re
 
+from app.services import needs
 from app.services import shopper_identity as identity
 
 # Tools whose result a client can render as cards, and the key it arrives under.
@@ -79,6 +80,10 @@ def _stem(word: str) -> str:
     return word[:-1] if len(word) > 3 and word.endswith("s") else word
 
 
+# The colours the chat already recognises in what a shopper types.
+_COLOUR_WORDS = {_stem(c) for c in needs._COLOURS}
+
+
 def _words(text: str) -> set[str]:
     stems = (_stem(w) for w in _WORD_RE.findall(text.lower()) if len(w) > 2)
     return {s for s in stems if s not in _NOISE}
@@ -114,7 +119,9 @@ def _mentioned_in(items: list[dict], reply: str) -> list[dict]:
     title_words = [(item, _words(item.get("title") or "")) for item in items]
 
     def named_by(word: str, words: set[str]) -> bool:
-        if len(word) >= SHORT_WORD:
+        # A colour is how a piece comes, not what it is called: "comes in Navy
+        # and Cream" drew the Cream shorts under a reply about plimsolls.
+        if len(word) >= SHORT_WORD and word not in _COLOUR_WORDS:
             return word in said
         return any(word in part and len(part & words) > 1 for part in sentences)
 
