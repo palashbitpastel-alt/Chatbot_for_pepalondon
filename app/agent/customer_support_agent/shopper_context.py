@@ -129,8 +129,12 @@ def describe(
     if context and context.on_screen:
         kind = {"look": "a look you built", "checklist": "your checklist, waiting for their OK"}.get(
             context.on_screen_kind or "", "pieces")
-        lines.append(f"The outfit they are putting together ({kind}), exactly as it stands - the "
-                     "pieces and options to keep unless they change them. Ticks are their choice - adding "
+        lines.append(f"An outfit from earlier in this chat ({kind}), exactly as it stands. It is "
+                     "background: use it only when they talk about the look itself (keep it, add them, swap "
+                     "a piece in it). A question about one piece - its colour, its size - is about that "
+                     "piece alone: answer it on its own card and never fold it into this look unless they "
+                     "ask. When they do mean the look: the pieces and options are kept unless they change "
+                     "them. Ticks are their choice - adding "
                      "\"them\" means the ticked rows only; an unticked row is one they took out, so "
                      "never add it unless they ask for it again:")
         for item in context.on_screen:

@@ -354,7 +354,7 @@ async def _load_history(session_id: str, asking: str = "") -> list[tuple[str, st
                 .limit(HISTORY_LIMIT)
             )
         ).scalars().all()
-    return _without_repeats([(m.role, m.content) for m in reversed(rows)], asking)
+    return _without_repeats([(m.role, _without_cards_note(m.content)) for m in reversed(rows)], asking)
 
 
 def _without_repeats(turns: list[tuple[str, str]], asking: str) -> list[tuple[str, str]]:
@@ -867,7 +867,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                             # Collected now, sent once the reply exists - see finalise().
                             cards.take(event["name"], event.get("output"))
                     elif event["type"] == "final":
-                        reply = event["reply"]
+                        reply = _without_cards_note(event["reply"])
                 if attempt or used_tools or not await _named_without_looking(reply, req.cart):
                     break
                 logger.info("Session %s: reply named products without a lookup; asking again", session_id)
@@ -905,14 +905,10 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         if req.cart is not None and not req.cart.items:
             cards.drop_empty_checkout()
         drawn = cards.as_dict()
-        # The agent only ever reads its own words back, never the cards drawn
-        # under them - so "I like the second one" pointed at nothing. The cards,
-        # in order, go into its memory of this turn (and out of /history).
-        shown = [i.get("title") for key in ("products", "outfit")
-                 for i in ((drawn.get(key) or {}).get("items") or []) if i.get("title")]
-        memory = reply if not shown else (
-            f"{reply}\n\n{_CARDS_NOTE} " + "; ".join(f"{n}. {t}" for n, t in enumerate(shown, 1)) + "]")
-        await _save_turn(session_id, req.message, memory)
+        # Saved as the shopper read it. A note of the cards used to ride along
+        # here and the agent copied it into its next reply; the widget now sends
+        # the cards on screen with every message instead (cards_on_screen).
+        await _save_turn(session_id, req.message, _without_cards_note(reply))
         for name, payload in drawn.items():
             yield _sse(name, payload)
         # The widget carries these out, in order: add these variants to the bag,
