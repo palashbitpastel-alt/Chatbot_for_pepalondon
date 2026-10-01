@@ -30,7 +30,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, _card
 from app.services import market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
-from app.services import size_finder, store_profile, suggestions
+from app.services import size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
@@ -743,9 +743,10 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
 
         # What they have asked for so far - age, occasion, budget, size - drawn by
         # the widget as the "Understood" panel and the "Searching for" chips.
+        turn_understood = None
         if req.message.strip():
             said = [c for r, c in history if r == "user"] + [req.message]
-            understood = needs.understood(
+            understood = await understanding.understood(
                 said, base=remembered, currency=(req.context.currency if req.context else None))
             # Who they are shopping for, so a mixed collection comes back as
             # theirs rather than half somebody else's.
@@ -756,6 +757,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.set_size(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "size"), None))
             identity.set_age(understood.get("age"))
+            turn_understood = understood
             identity.set_season(next(
                 (f["value"] for f in understood["fields"] if f["key"] == "season"), None))
             await _budget_in_their_money(
@@ -894,8 +896,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # rather than trimmed to the names said. Earlier turns count: "yes, show
         # me" after giving his age and budget put baby bonnets and a 20000 jacket
         # under a reply that had picked out the pieces in his size.
-        said_so_far = [c for r, c in history if r == "user"] + [req.message]
-        asked_for = {f["key"] for f in needs.understood(said_so_far)["fields"]}
+        # What the model read for the panel this turn, when it read anything.
+        asked_for = {f["key"] for f in (turn_understood or {}).get("fields") or []}
         names_a_kind = await _names_a_kind(req.message)
         narrowed = bool(asked_for & {"colour", "age", "size", "budget", "occasion", "style"}) or names_a_kind
         # A size shelf is only cut down by something beyond the size itself.
