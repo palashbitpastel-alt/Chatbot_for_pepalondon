@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.services import compare, extras, handbook, market, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
+from app.services import compare, extras, handbook, market, multi_buy, occasions, order_changes, outfit, shopify_storefront, size_finder, store_profile
 from app.services import shopper_identity as identity
 from app.services.shopify_client import ShopifyError, store_domain
 
@@ -575,7 +575,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     every piece says in_their_size true/false: offer the ones they can wear now and
     choose among them what answers the request - a kind they named, or the whole
     range when they asked generally. A piece with in_their_size=false is one to grow into - never the answer
-    on its own. worn_for says what the store's own words place a piece at.
+    on its own. largest_we_make marks pieces in our biggest size when the child is
+    older than our range: build the nearest look from those and say it is the
+    largest we make. sleepwear=true is nightwear - never offer it as a dress or
+    for an occasion unless they ask for nightwear. worn_for says what the store's own words place a piece at.
     occasion_matched=false means nothing in stock is written for that occasion:
     say these are the nearest rather than calling them wedding pieces.
     category_note means we sell that kind but none suits this child - say exactly
@@ -597,12 +600,20 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         size = size.strip() or (identity.wants_size() or "")
         if size:
             await _with_their_size(result, size)
+        # Older than our range for them: the pieces in the largest size we make,
+        # so the nearest look is in hand rather than a lone pair of plimsolls.
+        oldest = (result.get("nothing_else_fits") or {}).get("oldest_we_make")
+        if oldest:
+            await _with_their_size(result, f"{oldest}Y", nearest=True)
+        # Whether each piece is nightwear, read the same way everywhere else does.
+        for p in result.get("products") or []:
+            p["sleepwear"] = occasions.is_sleepwear(p.get("title") or "")
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("suggest_pieces", exc)
 
 
-async def _with_their_size(result: dict, size: str) -> None:
+async def _with_their_size(result: dict, size: str, nearest: bool = False) -> None:
     """Add what the shop sells in this child's own size to a few suggestions.
 
     The suggestions are one piece per part of an outfit, so a 3-month-old was
@@ -613,19 +624,29 @@ async def _with_their_size(result: dict, size: str) -> None:
     except (ShopifyError, KeyError, ValueError):
         return
     theirs = [p for p in (found or {}).get("products") or [] if p.get("product_id")]
+    # The kind they asked for is the kind added: asked for dresses, the skirts
+    # and jumpers in her size are not the answer.
+    kind = ((result.get("known") or {}).get("category") or "").strip().lower()
+    if kind:
+        theirs = [p for p in theirs if (p.get("category") or "").strip().lower() == kind]
     if not theirs:
         return
     fits = {str(p["product_id"]) for p in theirs}
     picks = result.get("products") or []
-    for p in picks:
-        p["in_their_size"] = str(p.get("product_id")) in fits
+    if not nearest:
+        for p in picks:
+            p["in_their_size"] = str(p.get("product_id")) in fits
     shown = {str(p.get("product_id")) for p in picks}
     keep = ("product_id", "variant_id", "title", "category", "for", "price_from", "currency",
             "in_this_size", "image", "url")
-    result["their_size"] = size
+    if nearest:
+        result["largest_size_we_make"] = size
+    else:
+        result["their_size"] = size
+    mark = {"largest_we_make": size} if nearest else {"in_their_size": True}
     # Each variant's own price rides along: the market pricing converts
     # price_from from them, and without them the dollars went out labelled INR.
-    result["products"] = picks + [{**{k: p.get(k) for k in keep}, "in_their_size": True,
+    result["products"] = picks + [{**{k: p.get(k) for k in keep}, **mark,
                                    "variants": [{"variant_id": v.get("variant_id"), "price": v.get("price")}
                                                 for v in p.get("variants") or []]}
                                   for p in theirs[:SHELF_FOR_MODEL]

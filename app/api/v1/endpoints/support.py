@@ -851,7 +851,16 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         country_token = market.set_country(req.context.country if req.context else None)
         showing_token = market.set_showing(req.context.currency if req.context else None)
         try:
-            asking = with_context(req.message, briefing)
+            # What was read from the chat so far - the same facts the Understood
+            # panel shows - so the agent does not ask "boy or girl?" after
+            # "a gift for him".
+            turn_briefing = briefing
+            if turn_understood and turn_understood.get("fields"):
+                told = "; ".join(f'{f["label"]}: {f["value"]}' for f in turn_understood["fields"])
+                note = (f"[Understood from the chat so far ('For' is who the purchase is for): {told}. "
+                        "Use these; do not ask for them again.]")
+                turn_briefing = f"{turn_briefing}\n{note}" if turn_briefing else note
+            asking = with_context(req.message, turn_briefing)
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any
             # tool is never re-run: it may have put something in their bag.
