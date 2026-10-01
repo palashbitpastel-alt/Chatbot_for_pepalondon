@@ -572,8 +572,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     lists its `sizes`: look at them against the child's age yourself and only offer
     a piece that actually comes in their size (a 3 month old is not in 18M, and a
     baby who cannot walk yet does not need walking shoes). Leave out what does not
-    fit; if nothing fits, say so honestly and look further (browse_in_size), never
-    present a piece that will not fit as the answer. worn_for says what the store's own words place a piece at.
+    fit. These are only a few pieces, not the whole shop: when they do not fit,
+    call browse_in_size with the child's size (3 months -> "3M") in the same turn
+    and show what that finds - do not ask whether to look, and never tell them
+    nothing fits until browse_in_size has said so. worn_for says what the store's own words place a piece at.
     occasion_matched=false means nothing in stock is written for that occasion:
     say these are the nearest rather than calling them wedding pieces.
     category_note means we sell that kind but none suits this child - say exactly
