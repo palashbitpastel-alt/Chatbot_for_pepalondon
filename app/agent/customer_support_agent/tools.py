@@ -680,8 +680,11 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False) -> No
     mark = {"largest_we_make": size} if nearest else {"in_their_size": True}
     # Each variant's own price rides along: the market pricing converts
     # price_from from them, and without them the dollars went out labelled INR.
+    # Its option, stock and photo too, so the card can open on a colour the
+    # shopper has not turned down.
     result["products"] = picks + [{**{k: p.get(k) for k in keep}, **mark,
-                                   "variants": [{"variant_id": v.get("variant_id"), "price": v.get("price")}
+                                   "variants": [{k: v.get(k) for k in
+                                                 ("variant_id", "price", "option", "available", "image")}
                                                 for v in p.get("variants") or []]}
                                   for p in theirs[:SHELF_FOR_MODEL]
                                   if str(p["product_id"]) not in shown]
