@@ -748,7 +748,9 @@ async def browse_in_size(size: str) -> str:
     label it is sold under (a 12Y request matches an 11-12Y piece). found=false:
     say plainly that nothing comes in that size and offer the nearest.
     Name the pieces with their prices - a count on its own ("8 pieces come in
-    12Y") leaves the shopper reading a number with unnamed cards beside it.
+    12Y") leaves the shopper reading a number with unnamed cards beside it. When
+    the size serves a wider request ("clothes for a 3 month old"), name only the
+    pieces that answer it - not a dummy or a bib that merely shares the size.
     """
     try:
         return json.dumps(_for_the_model(await shelf("browse_in_size", size)), ensure_ascii=False)
