@@ -30,7 +30,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
 from app.services import audience, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
-from app.services import size_finder, store_profile, suggestions, understanding
+from app.services import lessons, size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
@@ -869,6 +869,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             if n := (turn_understood or {}).get("count"):
                 ask = f"[They asked for exactly {n} item(s): choose and name exactly {n}, no more]"
                 turn_briefing = f"{turn_briefing}\n{ask}" if turn_briefing else ask
+            # Answers the shop owner reviewed for moments like this one.
+            last_reply = next((c for r, c in reversed(history) if r == "assistant"), None)
+            async with AsyncSessionLocal() as db:
+                taught = await lessons.recall(db, last_reply, req.message)
+            if taught:
+                turn_briefing = f"{turn_briefing}\n{taught}" if turn_briefing else taught
             asking = with_context(req.message, turn_briefing)
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any

@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     # A signature older than this is refused, so a copied page cannot be replayed.
     SUPPORT_CUSTOMER_SIGNATURE_MAX_AGE_HOURS: int = 24
 
+    # Opens the answer review page (/api/v1/review). The owner marks the assistant's
+    # answers good or wrong there and those verdicts guide later answers. Empty
+    # keeps the page closed.
+    REVIEW_KEY: str = ""
+
     # Shopify (New Shop)
     SHOPIFY_CLIENT_ID: str = ""
     SHOPIFY_CLIENT_SECRET: str = ""
