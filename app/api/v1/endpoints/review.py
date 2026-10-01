@@ -24,7 +24,7 @@ from app.api.v1.endpoints.support import SESSION_PREFIX, _without_cards_note
 from app.core.config import settings
 from app.db.models import ChatMessage
 from app.db.session import AsyncSessionLocal
-from app.services import lessons, replay, understanding
+from app.services import colours, lessons, replay, understanding
 
 router = APIRouter(tags=["review"])
 
@@ -161,3 +161,14 @@ async def replay_result(x_review_key: str | None = Header(default=None)) -> dict
         # The server restarted mid-run; nothing is still working on it.
         result = {**result, "status": "interrupted"}
     return result
+
+
+@router.get("/review/shades")
+async def shades(colour: str = Query(..., min_length=2, max_length=40),
+                 x_review_key: str | None = Header(default=None)) -> dict:
+    """Which of the store's own colour names the assistant reads as this colour."""
+    _check(x_review_key)
+    import time
+    started = time.monotonic()
+    found = await colours.shades_of((colour.strip().lower(),))
+    return {"colour": colour, "shades": list(found), "seconds": round(time.monotonic() - started, 1)}
