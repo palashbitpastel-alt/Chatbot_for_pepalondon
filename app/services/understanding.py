@@ -28,6 +28,8 @@ Return ONLY a JSON object with these keys, each a short string or null when not 
 - "season": "Summer" or "Winter" when they say so.
 - "style": a style word they used, e.g. "Smart", "Casual".
 - "colour": one colour they asked for, capitalised, e.g. "Navy".
+- "avoid_colour": a colour they turned down ("she doesn't like pink" -> "Pink"); kept until
+  they ask for it again. Never the same as "colour".
 - "budget": "Under {sym}15000" or "Around {sym}400" - their own currency sign if they used one,
   otherwise {sym}.
 - "size": a clothing size only if they named one, e.g. "5Y", "18M", "5-6Y".
@@ -44,6 +46,9 @@ def _fields(found: dict) -> dict:
     raw_count = found.get("count")
     count = raw_count if isinstance(raw_count, int) and 0 < raw_count <= 12 else None
     found = {k: str(v).strip() for k, v in found.items() if k in needs.FIELD_ORDER and v and str(v).strip()}
+    # A colour they turned down is no longer the colour they want.
+    if found.get("avoid_colour") and found.get("colour", "").lower() == found["avoid_colour"].lower():
+        found.pop("colour")
     # The rest of the shop reads a budget as "Under ₹15000" / "Around £400".
     if (b := found.get("budget")) and not re.match(r"(?i)(under|around)\b", b):
         found["budget"] = f"Under {b}"

@@ -610,7 +610,7 @@ def _colour_match(colours: list[str], wanted: str) -> str | None:
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
                          age: int | None = None, budget: float | None = None,
                          category: str = "", limit: int = SUGGESTION_LIMIT,
-                         min_price: float | None = None) -> dict:
+                         min_price: float | None = None, avoid_colour: str = "") -> dict:
     """A few in-stock pieces that suit what the shopper has said so far.
 
     Every filter is optional, so the first message of a conversation already
@@ -700,7 +700,18 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
     # Best fit first: the occasion the store's words actually place it at, then
     # a piece tagged for this child over one that merely suits either.
+    # A colour they turned down ("she doesn't like pink"): pieces that only come
+    # in it go to the back and say so - kept, so the agent can still explain.
+    avoid = (avoid_colour or "").strip().lower()
+
+    def only_in_avoided(p: dict) -> bool:
+        return bool(avoid) and bool(p["colors"]) and all(avoid in c.lower() for c in p["colors"])
+
+    # Their colour leads and a turned-down one trails, then best fit: the
+    # occasion the store's words place it at, a piece tagged for this child.
     pool.sort(key=lambda p: (
+        1 if only_in_avoided(p) else 0,
+        0 if not wanted or _colour_match(p["colors"], wanted) else 1,
         -_occasion_score(p, occasion),
         _season_first(p, season),
         0 if audience and audience in p["for"] else 1,
@@ -769,6 +780,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "price_from": p["price_from"],
                 "currency": catalogue["currency"],
                 "colour": _colour_match(p["colors"], wanted) if wanted else None,
+                "only_in_colour_they_dislike": only_in_avoided(p) or None,
                 "colors": p["colors"],
                 "sizes": p["sizes"],
                 "image": p["image"],
