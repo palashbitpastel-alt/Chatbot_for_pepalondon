@@ -556,20 +556,22 @@ async def get_best_sellers(limit: int = 5) -> str:
 
 @tool
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
-                         age: float = 0, budget: float = 0, category: str = "") -> str:
+                         age: float = 0, budget: float = 0, category: str = "",
+                         size: str = "") -> str:
     """A few real pieces that fit what you know so far. Use on EVERY turn of an
     outfit, occasion or gift request - before you ask anything.
 
     Fill in only what the shopper has told you in this conversation and leave the
     rest empty (age 0, budget 0). age is in years; a baby's months as a fraction
-    (3 months = 0.25, 9 months = 0.75). for_who: "boy", "girl" or "baby". colour: as they
+    (3 months = 0.25, 9 months = 0.75). size: the child's size or age exactly as the
+    shopper said it ("3 months", "5Y") - pass it whenever you know it. for_who: "boy", "girl" or "baby". colour: as they
     said it, e.g. "navy". occasion: their words, e.g. "birthday party".
     category: the kind of piece they named - "dress", "coat", "shoes". ALWAYS
       pass it when they named one: "a dress for a wedding" must come back as
       several dresses to choose between, not one dress and three other things.
       Leave it empty for "an outfit", "something for her", a gift.
-    Returns in-stock pieces, best fit first - name each with its price. Given an
-    age, the pieces sold in the child's own size (their_size) come back too, and
+    Returns in-stock pieces, best fit first - name each with its price. Given a
+    size, the pieces sold in the child's own size (their_size) come back too, and
     every piece says in_their_size true/false: offer the ones they can wear now and
     choose among them what answers the request (clothes for "a dress", not a
     dummy). A piece with in_their_size=false is one to grow into - never the answer
@@ -586,20 +588,19 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
                                              category=category, limit=6 if category else 4)
-        if age:
-            await _with_their_size(result, age)
+        if size.strip():
+            await _with_their_size(result, size.strip())
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("suggest_pieces", exc)
 
 
-async def _with_their_size(result: dict, age: float) -> None:
+async def _with_their_size(result: dict, size: str) -> None:
     """Add what the shop sells in this child's own size to a few suggestions.
 
     The suggestions are one piece per part of an outfit, so a 3-month-old was
     handed an 18M shirt and the agent had to remember a second lookup to find
     the 3M ones. It now has both in hand and decides; nothing is chosen here."""
-    size = f"{round(age * 12)}M" if age < 2 and age != int(age) else f"{int(age)}Y"
     try:
         found = await shelf("browse_in_size", size)
     except (ShopifyError, KeyError, ValueError):
