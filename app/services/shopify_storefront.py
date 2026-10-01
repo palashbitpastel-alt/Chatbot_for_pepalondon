@@ -1215,7 +1215,25 @@ def _collection_as_category(node: dict) -> dict:
         # opens with them rather than a bare count.
         "description": " ".join((node.get("description") or "").split())[:400] or None,
         "filter": f'collection_id:{node["legacyResourceId"]}',
+        "collection_id": node["legacyResourceId"],
     }
+
+
+COLLECTION_PRODUCT_IDS = """
+query SupportCollectionProductIds($id: ID!, $first: Int!) {
+  collection(id: $id) {
+    products(first: $first) { nodes { legacyResourceId } }
+  }
+}
+"""
+
+
+async def _collection_product_ids(collection_id: str, limit: int) -> list[str]:
+    """The products in a collection, straight from the collection."""
+    data = await graphql(COLLECTION_PRODUCT_IDS,
+                         {"id": f"gid://shopify/Collection/{collection_id}", "first": max(1, min(limit, 100))})
+    nodes = (((data.get("collection") or {}).get("products") or {}).get("nodes")) or []
+    return [n["legacyResourceId"] for n in nodes if n.get("legacyResourceId")]
 
 
 async def _collection_named(term: str) -> dict | None:
@@ -1502,6 +1520,14 @@ async def category_products(category: str, limit: int = 12) -> dict:
         return [_public_product(node, currency) for node in data["products"]["nodes"]]
 
     products = await fetch(found["filter"])
+    if not products and found.get("kind") == "collection" and found.get("collection_id"):
+        # A collection_id search came back empty on the live backend for every
+        # collection - New In (90 pieces) included - while the same search ran
+        # fine elsewhere. The collection's own product list does not depend on
+        # the search index, so read that, then keep only what is ours and active.
+        ids = await _collection_product_ids(found["collection_id"], limit)
+        if ids:
+            products = await fetch("(" + " OR ".join(f"id:{i}" for i in ids) + ")")
     if not products and found.get("kind") == "audience":
         # Not every store tags who a piece is for. Fall back to a collection of
         # that name ("Girls"), then to pieces that say it themselves ("Girls'
