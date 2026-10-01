@@ -862,9 +862,13 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         await _save_turn(session_id, req.message, reply)
         # Repeated in `done` so a client that only reads the final event still
         # gets the cards without having to follow the stream.
-        # Did this message narrow a category (colour, age, size, budget)? If not, a
-        # category browse is shown whole rather than trimmed to the names said.
-        asked_for = {f["key"] for f in needs.understood([req.message])["fields"]}
+        # Has the shopper narrowed things (colour, age, size, budget) - in this
+        # message or earlier in the chat? If not, a category browse is shown whole
+        # rather than trimmed to the names said. Earlier turns count: "yes, show
+        # me" after giving his age and budget put baby bonnets and a 20000 jacket
+        # under a reply that had picked out the pieces in his size.
+        said_so_far = [c for r, c in history if r == "user"] + [req.message]
+        asked_for = {f["key"] for f in needs.understood(said_so_far)["fields"]}
         names_a_kind = await _names_a_kind(req.message)
         narrowed = bool(asked_for & {"colour", "age", "size", "budget", "occasion", "style"}) or names_a_kind
         # A size shelf is only cut down by something beyond the size itself.
