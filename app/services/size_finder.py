@@ -111,7 +111,19 @@ def _size_label(raw: str) -> str:
 
 
 def _is_shoe_size(label: str) -> bool:
-    return bool(re.fullmatch(r"(?:EU\s*)?\d{2}(?:\.5)?", label.strip().upper()))
+    return _eu_of(label) is not None
+
+
+def _eu_of(label: str) -> float | None:
+    """The European number a shoe label means: "28", "EU 28" or the "28EU" in
+    "10UK/11US/28EU". One product spells it both ways across its colours, and
+    the mix sent the plimsolls to the clothing chart, which read 20 as an age."""
+    text = label.strip().upper()
+    if m := re.fullmatch(r"(?:EU\s*)?(\d{2}(?:\.5)?)", text):
+        return float(m.group(1))
+    if m := re.search(r"(\d{2}(?:\.5)?)\s*EU\b", text):
+        return float(m.group(1))
+    return None
 
 
 def _pick_offered(target: int, offered: list[str]) -> str | None:
@@ -208,7 +220,7 @@ def recommend(age: float | None = None, height_cm: float | None = None,
     offered = [_size_label(v) for v in outfit._options_of(product or {}).get("Size", [])] if product else []
     if offered and all(_is_shoe_size(x) for x in offered):
         eu = CHART[target].shoe_eu
-        recommended = min(offered, key=lambda x: abs(float(re.sub(r"[^\d.]", "", x)) - eu))
+        recommended = min(offered, key=lambda x: abs(_eu_of(x) - eu))
         reasons = ["Shoe sizes vary by foot length, so this is our best guess for their age."]
     elif offered:
         recommended = _pick_offered(target, offered) or CHART[target].label
