@@ -833,7 +833,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                         yield _sse("reset", {})
                     elif event["type"] == "tool":
                         used_tools = True
-                        yield _sse("tool", {"name": event["name"], "phase": event["phase"]})
+                        yield _sse("tool", {"name": event["name"], "phase": event["phase"],
+                                            **({"input": event["input"]} if event.get("input") else {})})
                         if event["phase"] == "end":
                             # Collected now, sent once the reply exists - see finalise().
                             cards.take(event["name"], event.get("output"))

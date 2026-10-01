@@ -158,7 +158,9 @@ async def stream_executor(
         elif kind == "on_tool_start":
             tokens.clear()
             yield {"type": "reset"}
-            yield {"type": "tool", "name": event["name"], "phase": "start"}
+            # The arguments too, so a wrong answer can be traced to what was asked of the tool.
+            yield {"type": "tool", "name": event["name"], "phase": "start",
+                   "input": event["data"].get("input")}
         elif kind == "on_tool_end":
             # Carry the tool's result too: a caller may want the structured data
             # behind the answer (product cards, for instance), not just the prose.
