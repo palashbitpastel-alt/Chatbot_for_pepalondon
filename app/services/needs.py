@@ -203,10 +203,11 @@ def understood(messages: list[str], base: dict | None = None, currency: str | No
     fixed display order, or no fields when nothing was said yet.
     """
     found: dict[str, str] = {k: v for k, v in (base or {}).items() if k in REMEMBERED and v}
+    remembered_age = found.get("age")
     age_years: int | None = None
     if found.get("age") and (m := re.match(r"(\d{1,2}) year", found["age"])):
         age_years = int(m.group(1))
-    said_age = said_size = False
+    said_age = said_size = said_colour = False
     for text in messages:
         if not text or not text.strip():
             continue
@@ -223,6 +224,7 @@ def understood(messages: list[str], base: dict | None = None, currency: str | No
             found["style"] = style
         if colour := _colour(text):
             found["colour"] = colour
+            said_colour = True
         if budget := _budget(text, symbol(currency)):
             found["budget"] = budget
         if size := _size(text):
@@ -233,6 +235,15 @@ def understood(messages: list[str], base: dict | None = None, currency: str | No
     # A newly given age replaces a size remembered from an older visit, too.
     if age_years and ("size" not in found or (said_age and not said_size)):
         found["size"] = f"{age_years}Y"
+
+    # A different age is a different child - "my 3 month old" after an earlier
+    # visit for a 5 year old. That visit's size and colour were his, not this
+    # one's: kept, they put "5Y, Brown" beside a baby's search.
+    if said_age and remembered_age and found.get("age") != remembered_age:
+        if not said_size and not age_years:
+            found.pop("size", None)
+        if not said_colour:
+            found.pop("colour", None)
 
     # "Party" as a style beside "Birthday party" says the same thing twice.
     style = found.get("style", "").lower()

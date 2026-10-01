@@ -710,7 +710,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
     if remembered and req.message.strip():
         told = "; ".join(f"{needs.LABELS[k]}: {v}" for k, v in remembered.items())
         memo = (f"[Remembered from their earlier visits: {told}. Use these unless they say otherwise; "
-                "do not ask again for what is here.]")
+                "do not ask again for what is here. If they now describe a different child (another "
+                "age), these belong to the earlier one: do not apply or mention them.]")
         briefing = f"{briefing}\n{memo}" if briefing else memo
     shopper = identity.resolve(req.customer)
     if shopper is not None:
