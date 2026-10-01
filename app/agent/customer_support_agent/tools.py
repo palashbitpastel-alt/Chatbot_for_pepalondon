@@ -121,6 +121,12 @@ async def add_to_cart(items: list[dict], they_asked: str, confirm_first: bool = 
     # size goes in only if the shopper named it. Asked for Red 5/6Y, which Red does
     # not come in, the agent twice bagged a size of its own choosing (0-3M, 4/6Y).
     # A size they never gave is dropped, so the tool asks them instead.
+    # Several cards on screen and none opened: "add it" could mean any of them.
+    # The shopper sees the exact piece and size in a checklist and confirms it -
+    # nothing goes in the bag on a guess.
+    cards, viewing = identity.on_screen()
+    if not confirm_first and len(cards) > 1 and not viewing:
+        confirm_first = True
     # A checklist the shopper confirms is their choice, so it skips this.
     unchosen = []
     for item in items if not confirm_first else []:
@@ -575,12 +581,13 @@ async def get_best_sellers(limit: int = 5) -> str:
 @tool
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
                          age: float = 0, budget: float = 0, category: str = "",
-                         size: str = "") -> str:
+                         size: str = "", min_price: float = 0) -> str:
     """A few real pieces that fit what you know so far. Use on EVERY turn of an
     outfit, occasion or gift request - before you ask anything.
 
     Fill in only what the shopper has told you in this conversation and leave the
-    rest empty (age 0, budget 0). age is in years; a baby's months as a fraction
+    rest empty (age 0, budget 0). budget is the most a piece may cost, min_price
+    the least (for "something more expensive" than a piece, pass its price). age is in years; a baby's months as a fraction
     (3 months = 0.25, 9 months = 0.75). size: the child's size or age exactly as the
     shopper said it ("3 months", "5Y") - pass it whenever you know it. for_who: "boy", "girl" or "baby". colour: as they
     said it, e.g. "navy". occasion: their words, e.g. "birthday party".
@@ -613,7 +620,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     """
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
-                                             category=category, limit=6 if category else 4)
+                                             category=category, limit=6 if category else 4,
+                                             min_price=min_price or None)
         # Their size from the chat when the agent did not pass one on.
         size = size.strip() or (identity.wants_size() or "")
         if size:

@@ -609,7 +609,8 @@ def _colour_match(colours: list[str], wanted: str) -> str | None:
 
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
                          age: int | None = None, budget: float | None = None,
-                         category: str = "", limit: int = SUGGESTION_LIMIT) -> dict:
+                         category: str = "", limit: int = SUGGESTION_LIMIT,
+                         min_price: float | None = None) -> dict:
     """A few in-stock pieces that suit what the shopper has said so far.
 
     Every filter is optional, so the first message of a conversation already
@@ -657,6 +658,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         pool = [p for p in pool if _fits_age(p["sizes"], age)]
     if budget:
         pool = [p for p in pool if p["price_from"] is not None and p["price_from"] <= budget]
+    # "Something more expensive" than the piece they were shown: a floor, in the
+    # same money as the prices (localised above).
+    if min_price:
+        pool = [p for p in pool if p["price_from"] is not None and p["price_from"] > min_price]
 
     # "A dress for a wedding": show dresses, not one dress and three other things.
     in_stock = [p for p in catalogue["products"] if p["in_stock"]]

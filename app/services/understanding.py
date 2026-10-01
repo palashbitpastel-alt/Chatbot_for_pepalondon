@@ -23,7 +23,7 @@ _PROMPT = """You read a shopper's messages to a children's clothing shop and not
 Return ONLY a JSON object with these keys, each a short string or null when not said:
 - "for": "Girl", "Boy" or "Baby" - the person the purchase is FOR (the recipient). "A gift
   for my daughter's friend, he turns 5" is for a Boy. Baby only for a baby whose sex is not given.
-- "age": the recipient's age as "5 years" or "3 months".
+- "age": the recipient's age as "5 years" or "3 months" ("a newborn" is "0 months").
 - "occasion": e.g. "Birthday", "Wedding", "School", "Christmas".
 - "season": "Summer" or "Winter" when they say so.
 - "style": a style word they used, e.g. "Smart", "Casual".

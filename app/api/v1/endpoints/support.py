@@ -830,6 +830,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         token = identity.set_current(shopper)
         session_token = identity.set_session(session_id)
         cart_token = identity.set_cart(req.cart)
+        screen_token = identity.set_screen(
+            req.context.cards_on_screen if req.context else None,
+            req.context.viewing_product if req.context else None)
         saved_token = identity.set_saved(req.saved)
         # What the shopper has actually written, so that nothing can be put in
         # their bag unless the agent quotes the words that asked for it. Their
@@ -889,6 +892,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset(token)
             identity.reset_session(session_token)
             identity.reset_cart(cart_token)
+            identity.reset_screen(screen_token)
             identity.reset_saved(saved_token)
             identity.reset_said(said_token)
             market.reset_country(country_token)

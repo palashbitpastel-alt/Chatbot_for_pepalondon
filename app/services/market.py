@@ -82,6 +82,12 @@ async def in_our_money(amount: float, their_money: str, product_ids) -> dict | N
     here = current_country()
     code = SYMBOL_CURRENCY.get((their_money or "").strip(), (their_money or "").strip().upper())
     there = CURRENCY_COUNTRY.get(code)
+    # Already the money they are being quoted ("£60" from a UK shopper): nothing
+    # to convert. Answering "we don't sell in that money" here sent a shopper in
+    # pounds away to restate a budget that was fine.
+    if amount and code and code == (_showing.get() or "").upper():
+        return {"their_budget": float(amount), "their_currency": code,
+                "our_budget": float(amount), "our_currency": code, "same_money": True}
     if not here or not there or here == there or not amount:
         return None
     ids = {str(i) for i in (product_ids if isinstance(product_ids, (list, set, tuple))

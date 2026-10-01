@@ -145,6 +145,24 @@ def said_messages() -> tuple:
 _cart: ContextVar[object | None] = ContextVar("current_cart", default=None)
 
 
+# What is on their screen: the product cards under the last reply, and the one
+# piece they opened, if any. "Add it" with six cards and nothing opened is not
+# something to guess at.
+_screen: ContextVar[tuple] = ContextVar("on_screen", default=((), None))
+
+
+def set_screen(cards, viewing) -> object:
+    return _screen.set((tuple(str(c) for c in (cards or []) if c), viewing or None))
+
+
+def reset_screen(token) -> None:
+    _screen.reset(token)
+
+
+def on_screen() -> tuple:
+    return _screen.get()
+
+
 def set_cart(cart) -> object:
     return _cart.set(cart)
 
