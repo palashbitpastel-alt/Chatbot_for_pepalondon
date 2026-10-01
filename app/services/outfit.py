@@ -714,7 +714,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "known": {"for": audience, "colour": colour or None, "occasion": occasion or None,
                   "age": age, "budget": budget or None, "category": wanted_category},
         "category_note": category_note,
-        "nothing_else_fits": _range_note(catalogue["products"], audience, age) if not picked else None,
+        # Said whenever the child is older than our range for them, not only when
+        # nothing came back: a 12 year old was handed one pair of plimsolls and
+        # a question, with the 10Y shirts and chinos never in front of the agent.
+        "nothing_else_fits": _range_note(catalogue["products"], audience, age),
         "occasion_matched": bool(occasion) and any(
             _occasion_score(p, occasion) >= 2 for p in picked),
         "colour_matched": colour_matched,
