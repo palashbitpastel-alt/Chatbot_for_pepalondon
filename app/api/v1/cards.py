@@ -346,6 +346,8 @@ class CardCollector:
         self.products_whole = False
         self.products_fixed = False
         self.products_tool: str | None = None
+        # Every product result this turn, in the order they finished.
+        self.product_results: list[tuple[str, dict]] = []
         # Instructions for the widget - add these variants, open checkout - in
         # the order the agent issued them.
         self.actions: list[dict] = []
@@ -394,8 +396,27 @@ class CardCollector:
             self.products_whole = tool_name in WHOLE_RESULT_TOOLS
             self.products_fixed = tool_name in FIXED_RESULT_TOOLS
             self.products_tool = tool_name
+            self.product_results.append((tool_name, cards))
         setattr(self, name, cards)
         return name, cards
+
+    def _pick_products(self, reply: str) -> None:
+        """Of several product results, the one the reply is about.
+
+        The agent can run two lookups at once - suggest_pieces and browse_in_size -
+        and they finish in any order. Taking whichever finished last put an 18M
+        shirt under a reply listing six pieces in 3M. The result whose products
+        the reply actually names is the answer; a tie goes to the later one."""
+        if len(self.product_results) < 2:
+            return
+        text = _without_choices(reply)
+        best = max(enumerate(self.product_results),
+                   key=lambda r: (len(keep_mentioned(r[1][1].get("items") or [], text)), r[0]))
+        tool_name, cards = best[1]
+        self.products = cards
+        self.products_tool = tool_name
+        self.products_whole = tool_name in WHOLE_RESULT_TOOLS
+        self.products_fixed = tool_name in FIXED_RESULT_TOOLS
 
     def finalise(self, reply: str, narrowed: bool = True, narrowed_past_size: bool | None = None) -> None:
         """Reconcile the cards with the answer the shopper actually reads.
@@ -421,6 +442,7 @@ class CardCollector:
                 self.orders = {**self.orders, "orders": named}
         if self.outfit is not None or self.orders is not None:
             return
+        self._pick_products(reply)
         # Choices are never reconciled against the wording: the whole point is
         # that they do not depend on what the agent chose to say.
         if self.products is None or self.products_fixed:
