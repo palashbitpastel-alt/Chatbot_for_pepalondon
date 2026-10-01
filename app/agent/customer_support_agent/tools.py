@@ -581,7 +581,8 @@ async def get_best_sellers(limit: int = 5) -> str:
 @tool
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
                          age: float = 0, budget: float = 0, category: str = "",
-                         size: str = "", min_price: float = 0, avoid_colour: str = "") -> str:
+                         size: str = "", min_price: float = 0, avoid_colour: str = "",
+                         exclude: list[str] | None = None) -> str:
     """A few real pieces that fit what you know so far. Use on EVERY turn of an
     outfit, occasion or gift request - before you ask anything.
 
@@ -591,7 +592,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     avoid_colour: a colour they turned down ("she doesn't like pink") - pieces
     only made in it come last, marked only_in_colour_they_dislike: leave them out.
     too_small_for_them=true: even this piece's biggest size is below the child -
-    never offer it. age is in years; a baby's months as a fraction
+    never offer it. exclude: titles or handles they have already seen and turned
+    down ("I don't like these", "show me different ones") - pass the cards on
+    their screen so the new set is genuinely new. age is in years; a baby's months as a fraction
     (3 months = 0.25, 9 months = 0.75). size: the child's size or age exactly as the
     shopper said it ("3 months", "5Y") - pass it whenever you know it. for_who: "boy", "girl" or "baby". colour: as they
     said it, e.g. "navy". occasion: their words, e.g. "birthday party".
@@ -625,7 +628,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
                                              category=category, limit=6 if category else 4,
-                                             min_price=min_price or None, avoid_colour=avoid_colour)
+                                             min_price=min_price or None, avoid_colour=avoid_colour,
+                                             exclude=exclude)
         # Their size from the chat when the agent did not pass one on.
         size = size.strip() or (identity.wants_size() or "")
         if size:

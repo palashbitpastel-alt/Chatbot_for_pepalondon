@@ -605,7 +605,8 @@ def _colour_match(colours: list[str], wanted: str) -> str | None:
 async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = "",
                          age: int | None = None, budget: float | None = None,
                          category: str = "", limit: int = SUGGESTION_LIMIT,
-                         min_price: float | None = None, avoid_colour: str = "") -> dict:
+                         min_price: float | None = None, avoid_colour: str = "",
+                         exclude: list[str] | None = None) -> dict:
     """A few in-stock pieces that suit what the shopper has said so far.
 
     Every filter is optional, so the first message of a conversation already
@@ -695,6 +696,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
     # Best fit first: the occasion the store's words actually place it at, then
     # a piece tagged for this child over one that merely suits either.
+    # Pieces they have already seen and turned down ("I don't like these"): left
+    # out, by handle or title, so the next set is genuinely new.
+    seen = {str(x).strip().lower() for x in exclude or [] if str(x).strip()}
+    if seen:
+        pool = [p for p in pool if p["handle"].lower() not in seen and p["title"].lower() not in seen]
+
     # A colour they turned down ("she doesn't like pink"): pieces that only come
     # in it go to the back and say so - kept, so the agent can still explain.
     avoid = (avoid_colour or "").strip().lower()
@@ -705,6 +712,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     # Their colour leads and a turned-down one trails, then best fit: the
     # occasion the store's words place it at, a piece tagged for this child.
     pool.sort(key=lambda p: (
+        # A piece the child has outgrown never takes a part of the look while
+        # one that fits exists (26EU baby shoes left a 5 year old with no shoes).
+        1 if _outgrown(p, age) else 0,
         1 if only_in_avoided(p) else 0,
         0 if not wanted or _colour_match(p["colors"], wanted) else 1,
         -_occasion_score(p, occasion),
