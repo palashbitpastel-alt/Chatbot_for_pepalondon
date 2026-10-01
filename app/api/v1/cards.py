@@ -214,10 +214,15 @@ def _in_their_colour(item: dict) -> dict:
                       if v.get("available") and wanted in str(v.get("option") or "").lower()), None)
     # "She doesn't like pink": a piece that also comes in other colours opens in
     # one of them - the same size where it can - with that colour's picture.
-    if not match and avoided and any(a in str(item.get("option") or "").lower() for a in avoided):
-        current = set(p.strip().lower() for p in str(item.get("option") or "").split("/"))
-        others = [v for v in variants if v.get("available") and not is_avoided(v)]
-        match = max(others, key=lambda v: len(current & set(parts(v))), default=None)
+    if not match and avoided:
+        # The variant this card would open on: its own, else the product's first.
+        opening = next((v for v in variants if item.get("variant_id")
+                        and v.get("variant_id") == item.get("variant_id")), None) \
+            or next((v for v in variants if v.get("available")), None) or {}
+        if opening and is_avoided(opening):
+            current = set(parts(opening))
+            others = [v for v in variants if v.get("available") and not is_avoided(v)]
+            match = max(others, key=lambda v: len(current & set(parts(v))), default=None)
     if not match:
         return item
     return {**item,
