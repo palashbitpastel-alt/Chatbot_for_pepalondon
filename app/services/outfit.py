@@ -1197,11 +1197,12 @@ async def complete_the_look(product: str, size: str | None = None,
         open_rows = []
         for item in look.get("outfit") or []:
             if sized.get(item.get("handle"), 0) > 1:
-                item["variant_id"] = None
+                # The variant stays only so the price can be quoted in the
+                # shopper's money; "needs" keeps it out of the bag until they size it.
                 item["option"] = None
                 item["needs"] = ["size"]
                 open_rows.append(item["title"])
-        look["cart_items"] = [{"variant_id": c["variant_id"], "quantity": c["quantity"]}
+        look["cart_items"] = [{"variant_id": None if c.get("needs") else c["variant_id"], "quantity": c["quantity"]}
                               for c in look.get("outfit") or []]
         if open_rows:
             look["sizes_to_choose"] = open_rows

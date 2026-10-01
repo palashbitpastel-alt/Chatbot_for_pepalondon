@@ -276,6 +276,8 @@ def _card(item: dict) -> dict:
         "url": item.get("url"),
         # Only recommendations set this; it is why the product was suggested.
         "because": item.get("because"),
+        # What the shopper still has to choose before this piece can be bagged.
+        **({"needs": item["needs"]} if item.get("needs") else {}),
     }
 
 
