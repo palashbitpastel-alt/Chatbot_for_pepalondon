@@ -43,7 +43,9 @@ Return ONLY a JSON object with these keys, each a short string or null when not 
   -> 2), else null. Never an age, a size, a price or a number of children.
 The latest message wins when they change something. A different child from the one before
 (another age) replaces the earlier one's size and colour, and "for" is null unless the
-messages say who this child is.{remembered}"""
+messages say who this child is. A size that cannot be the earlier child's (a baby size after a
+14 year old, or the reverse) is a different child too: drop the earlier child's age, occasion,
+colour and style unless the newest messages say them again.{remembered}"""
 
 
 def _fields(found: dict) -> dict:

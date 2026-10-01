@@ -52,11 +52,40 @@ def _clamp(i: int) -> int:
 
 
 def _index_for(value: float, attr: str) -> int:
-    """The smallest size cut for a child this tall (or this full in the chest)."""
+    """The smallest size cut for a child this tall (or this full in the chest).
+
+    Well below the smallest size it counts down past 0, one rung per step of
+    the chart, so "40 cm" for a 3-month-old reads as far from their age - most
+    likely a typo - instead of quietly becoming the smallest size."""
+    first, step = getattr(CHART[0], attr), getattr(CHART[1], attr) - getattr(CHART[0], attr)
+    if value < first - step and step > 0:
+        return -int(-(-(first - value) // step))
     for i, band in enumerate(CHART):
         if value <= getattr(band, attr):
             return i
     return TOP
+
+
+def typical_for_age(age: float) -> dict | None:
+    """What a child of this age usually measures, from the chart: a starting
+    point the quiz offers, which the shopper keeps or replaces with their own."""
+    if age is None or age < 0:
+        return None
+    i = _clamp(_label_index(round(age * 12), "M") if age < 2 else _label_index(int(age), "Y"))
+    low = CHART[i - 1] if i > 0 else None
+    band = CHART[i]
+    return {
+        "size": band.label,
+        "height_cm": round(((low.height_cm if low else band.height_cm - 6) + band.height_cm) / 2),
+        "chest_cm": round(((low.chest_cm if low else band.chest_cm - 2) + band.chest_cm) / 2),
+        "height_range": [low.height_cm if low else None, band.height_cm],
+        "chest_range": [low.chest_cm if low else None, band.chest_cm],
+        "beyond_our_sizes": bool(i == TOP and age >= int(CHART[TOP].label[:-1]) + 1),
+    }
+
+
+def _label_of(i: int) -> str:
+    return CHART[i].label if i >= 0 else f"smaller than {CHART[0].label}"
 
 
 def _near_limit(value: float, i: int, attr: str) -> bool:
@@ -186,9 +215,9 @@ def recommend(age: float | None = None, height_cm: float | None = None,
             return {
                 "found": False,
                 "reason": "answers_disagree",
-                "points_to": {k: CHART[v].label for k, v in said.items()},
+                "points_to": {k: _label_of(v) for k, v in said.items()},
                 "tell_customer": ("Those answers point to very different sizes ("
-                                  + ", ".join(f"{k} {CHART[v].label}" for k, v in said.items())
+                                  + ", ".join(f"{k} {_label_of(v)}" for k, v in said.items())
                                   + "). Could you check them? Height and usual size matter most."),
             }
         rung = max(trusted.values())
@@ -196,7 +225,9 @@ def recommend(age: float | None = None, height_cm: float | None = None,
         shown = {"height": lambda: f"{height_cm:g} cm tall", "chest": lambda: f"a {chest_cm:g} cm chest",
                  "age": lambda: f"age {age:g}", "usual size": lambda: f"usual size {usual_size}"}
         warning = (f"We went by the {' and '.join(trusted)}{', which agree' if len(trusted) > 1 else ''}. "
-                   + (lambda x: x[:1].upper() + x[1:])(" and ".join(f"{shown[k]()} is more like {CHART[v].label}" for k, v in odd.items()))
+                   + (lambda x: x[:1].upper() + x[1:])(" and ".join(f"{shown[k]()} is " + (f"more like {CHART[v].label}" if v >= 0 else
+                                                       f"smaller than even our smallest size ({CHART[0].label})")
+                                for k, v in odd.items()))
                    + (f" - a child in {CHART[rung].label} is usually about {typical[0]}-{typical[1]} cm tall"
                       if "height" in odd else "")
                    + ", so it's worth double-checking.")

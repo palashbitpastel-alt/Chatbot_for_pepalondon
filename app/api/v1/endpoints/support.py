@@ -533,6 +533,12 @@ async def support_size(req: SizeRequest) -> dict:
         raise HTTPException(status_code=502, detail="The store catalogue could not be reached.") from exc
 
 
+@router.get("/support/size/typical")
+async def support_size_typical(age: float = Query(..., ge=0, le=16)) -> dict:
+    """The usual height and chest for an age, so the quiz can offer them."""
+    return size_finder.typical_for_age(age) or {}
+
+
 @router.get("/support/topup")
 async def support_topup(
     country: str = Query(default="", max_length=2),
