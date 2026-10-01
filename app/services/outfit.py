@@ -560,6 +560,23 @@ def _typical_shoe_eu(age: float | None) -> int | None:
     return size_finder.CHART[i].shoe_eu
 
 
+def _outgrown(piece: dict, age: float | None) -> bool:
+    """Whether even this piece's largest size is below the child: a 4Y-at-most
+    pair of trousers, or 26EU-at-most shoes, for a 6 year old. Read from the
+    piece's own sizes against the size chart - a fact for the agent to act on."""
+    if not age:
+        return False
+    sizes = [str(x) for x in piece.get("sizes") or []]
+    ages = [a for x in sizes if (a := _age_of(x)) is not None]
+    if ages:
+        return max(ages) < int(age)
+    numbers = _numbers_in(sizes)
+    usual = _typical_shoe_eu(age)
+    if numbers and usual and len(numbers) == len(sizes):
+        return max(numbers) < usual - 1
+    return False
+
+
 def _fits_age(sizes: list[str], age: int | None) -> bool:
     """Whether a piece comes in a size for this age. Pieces with no size run fit."""
     if age is None or not sizes:
@@ -781,6 +798,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "currency": catalogue["currency"],
                 "colour": _colour_match(p["colors"], wanted) if wanted else None,
                 "only_in_colour_they_dislike": only_in_avoided(p) or None,
+                "too_small_for_them": _outgrown(p, age) or None,
                 "colors": p["colors"],
                 "sizes": p["sizes"],
                 "image": p["image"],

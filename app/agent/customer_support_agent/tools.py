@@ -589,7 +589,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     rest empty (age 0, budget 0). budget is the most a piece may cost, min_price
     the least (for "something more expensive" than a piece, pass its price).
     avoid_colour: a colour they turned down ("she doesn't like pink") - pieces
-    only made in it come last, marked only_in_colour_they_dislike: leave them out. age is in years; a baby's months as a fraction
+    only made in it come last, marked only_in_colour_they_dislike: leave them out.
+    too_small_for_them=true: even this piece's biggest size is below the child -
+    never offer it. age is in years; a baby's months as a fraction
     (3 months = 0.25, 9 months = 0.75). size: the child's size or age exactly as the
     shopper said it ("3 months", "5Y") - pass it whenever you know it. for_who: "boy", "girl" or "baby". colour: as they
     said it, e.g. "navy". occasion: their words, e.g. "birthday party".
