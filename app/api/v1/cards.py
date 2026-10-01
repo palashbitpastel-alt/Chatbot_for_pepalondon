@@ -119,11 +119,14 @@ def _mentioned_in(items: list[dict], reply: str) -> list[dict]:
     title_words = [(item, _words(item.get("title") or "")) for item in items]
 
     def named_by(word: str, words: set[str]) -> bool:
-        # A colour is how a piece comes, not what it is called: "comes in Navy
-        # and Cream" drew the Cream shorts under a reply about plimsolls.
-        if len(word) >= SHORT_WORD and word not in _COLOUR_WORDS:
-            return word in said
-        return any(word in part and len(part & words) > 1 for part in sentences)
+        if any(word in part and len(part & words) > 1 for part in sentences):
+            return True
+        # On its own a word names a product only when it is written as a name -
+        # "the Alice", not "I'd need to check" beside the George Check shirt.
+        # A colour never does: "comes in Navy and Cream" is not the Cream shorts.
+        if len(word) < SHORT_WORD or word in _COLOUR_WORDS or word not in said:
+            return False
+        return bool(re.search(r"\b" + re.escape(word[:1].upper() + word[1:]), reply))
 
     frequency: dict[str, int] = {}
     for _, words in title_words:

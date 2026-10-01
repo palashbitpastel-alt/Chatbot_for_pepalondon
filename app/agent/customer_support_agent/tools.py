@@ -584,6 +584,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     missing - ask for the FIRST one only. Once age is known, build the whole look
     with build_outfit, using these handles - a budget is optional, never a reason
     to wait (budget_optional=true: build it, then say they can give one to adjust).
+    typical_shoe_eu_for_age is the size chart's usual EU shoe size at their age:
+    for a shoe, choose the size it is sold in nearest that number and say so.
     """
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,

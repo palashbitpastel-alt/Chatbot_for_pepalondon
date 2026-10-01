@@ -531,6 +531,19 @@ def _role_of(product: dict) -> str:
     return _category(product.get("title") or "", None)
 
 
+def _typical_shoe_eu(age: float | None) -> int | None:
+    """The size chart's typical EU shoe size at this age (a fact, not a pick)."""
+    if not age:
+        return None
+    from app.services import size_finder
+    label = f"{round(age * 12)}M" if age < 2 else f"{int(age)}Y"
+    i = size_finder.INDEX.get(label)
+    if i is None:
+        i = size_finder._clamp(size_finder._label_index(round(age * 12), "M") if age < 2
+                               else size_finder._label_index(int(age), "Y"))
+    return size_finder.CHART[i].shoe_eu
+
+
 def _fits_age(sizes: list[str], age: int | None) -> bool:
     """Whether a piece comes in a size for this age. Pieces with no size run fit."""
     if age is None or not sizes:
@@ -713,6 +726,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                  "here (e.g. no top in their colour): take it from browse_catalogue - a whole "
                  "outfit, never a smaller one.")
                 if not still_to_ask and not wanted_category else None,
+        # A shoe is sized by number, not age: the size chart's typical EU size for
+        # a child this old, so a shoe in the look is not a guess.
+        "typical_shoe_eu_for_age": _typical_shoe_eu(age),
         "count": len(picked),
         "products": [
             {
@@ -1357,7 +1373,14 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
             left_out.append({"title": product["title"], "reason": "for_another_child",
                              "shopping_for": for_whom})
             continue
-        if not _suits_age(piece, how_old):
+        # The agent may knowingly choose the nearest size a piece is sold in -
+        # a 12 year old where the boys' range stops at 10Y. That choice stands;
+        # only a baby piece in an older child's look is still kept out.
+        sold_in_asked = bool(size) and any(str(size).strip().lower() == str(x).strip().lower()
+                                           for x in piece["sizes"])
+        baby_piece = (how_old is not None and how_old >= OUT_OF_THE_PRAM
+                      and any(w in (piece["title"] or "").lower() for w in BABY_ONLY))
+        if baby_piece or (not sold_in_asked and not _suits_age(piece, how_old)):
             left_out.append({"title": product["title"], "reason": "not_made_for_this_age",
                              "age": how_old})
             continue
