@@ -656,12 +656,10 @@ class CardCollector:
         """Whatever was collected, for the final payload."""
         out: dict = {}
         if self.products is not None:
-            items = self.products.get("items") or []
-            if self.products.get("shelf"):
-                out["products"] = _as_page(self.products)
-            else:
-                out["products"] = ({**self.products, "items": items[:MAX_CARDS]}
-                                   if len(items) > MAX_CARDS else self.products)
+            # Every piece the agent chose to show: "show me all for girls" stopped
+            # at twelve. The storefront opens on a few and folds the rest behind
+            # "+N more", so a long answer stays readable.
+            out["products"] = _as_page(self.products) if self.products.get("shelf") else self.products
         if self.outfit is not None:
             out["outfit"] = self.outfit
         if self.orders is not None:
