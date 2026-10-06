@@ -537,7 +537,10 @@ class CardCollector:
         for _, result in self.product_results:
             currency = currency or result.get("currency")
             for item in result.get("items") or []:
-                pool.setdefault(str(item.get("product_id")), item)
+                # A later lookup of the same piece wins: product_details after
+                # suggest_pieces carries the variant and size they chose, and the
+                # list's bare card opened the piece on "Choose size" instead.
+                pool[str(item.get("product_id"))] = item
         picked = [pool[i] for i in dict.fromkeys(declared) if i in pool]
         if not picked:
             return False
