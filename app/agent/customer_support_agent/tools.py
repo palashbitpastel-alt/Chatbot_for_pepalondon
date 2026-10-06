@@ -613,7 +613,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     category: the kind of piece they named - "dress", "coat", "shoes". ALWAYS
       pass it when they named one: "a dress for a wedding" must come back as
       several dresses to choose between, not one dress and three other things.
-      Leave it empty for "an outfit", "something for her", a gift.
+      Leave it empty for "an outfit" or a gift. Asked what we have for an
+      occasion ("what do you have for her birthday"), pass the main kind that
+      you judge suits this child and occasion, so they see several to choose
+      between rather than one of each part.
     Returns in-stock pieces, best fit first - name each with its price. Given a
     size, the pieces sold in the child's own size (their_size) come back too, and
     every piece says in_their_size true/false: offer the ones they can wear now and
@@ -631,8 +634,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     come in it are listed first (each piece's colour field is the matching shade,
     null when it does not come in it) and the rest follow: never call a list of
     them "all we have" - the others exist in other colours. still_to_ask lists what is
-    missing - ask for the FIRST one only. Once age is known, build the whole look
-    with build_outfit, using these handles - a budget is optional, never a reason
+    missing - ask for the FIRST one only. When they asked for an outfit, once age
+    is known build the whole look with build_outfit, using these handles - a budget is optional, never a reason
     to wait (budget_optional=true: build it, then say they can give one to adjust).
     typical_shoe_eu_for_age is the size chart's usual EU shoe size at their age:
     for a shoe, choose the size it is sold in nearest that number and say so.
