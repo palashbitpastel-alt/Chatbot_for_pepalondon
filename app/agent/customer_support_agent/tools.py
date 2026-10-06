@@ -616,11 +616,11 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
       Leave it empty for "an outfit" or a gift. Asked what we have for an
       occasion ("what do you have for her birthday"), pass the main kind that
       you judge suits this child and occasion, so they see several to choose
-      between rather than one of each part. other_kind=true: only a piece or
-      two of that kind comes in their size, so these are the other pieces we
-      have in it - show those that suit the occasion alongside, so they have a
-      real choice, and never say our range stops below their size while
-      pieces in it are listed.
+      between rather than one of each part. other_kind=true: a piece of
+      another kind that also comes in their size. When they named the kind,
+      leave these out; when you chose it and few of it fit, show those that
+      suit the occasion alongside - your call. Never say our range stops below
+      their size while pieces in it are listed.
     Returns in-stock pieces, best fit first - name each with its price. Given a
     size, the pieces sold in the child's own size (their_size) come back too, and
     every piece says in_their_size true/false: offer the ones they can wear now and
@@ -666,9 +666,6 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         return _fail("suggest_pieces", exc)
 
 
-FEW_OF_A_KIND = 3
-
-
 async def _with_their_size(result: dict, size: str, nearest: bool = False) -> None:
     """Add what the shop sells in this child's own size to a few suggestions.
 
@@ -685,10 +682,9 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False) -> No
     kind = ((result.get("known") or {}).get("category") or "").strip().lower()
     theirs = [p for p in everything if (p.get("category") or "").strip().lower() == kind] if kind else everything
     # One dress in 12Y left a 12 year old's party with one product and a claim
-    # that the range stops at 10Y. With so few of that kind in their size, the
-    # other pieces in it ride along; the agent decides which suit the occasion.
-    others = [p for p in everything if p not in theirs] \
-        if kind and not nearest and len(theirs) < FEW_OF_A_KIND else []
+    # that the range stops at 10Y. The other pieces in their size ride along,
+    # flagged; the agent decides whether any of them belong in the answer.
+    others = [p for p in everything if p not in theirs] if kind and not nearest else []
     if not theirs and not others:
         return
     # Sold in their size, whatever its kind.

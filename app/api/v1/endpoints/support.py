@@ -757,7 +757,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # replays: the 8-row window lost the age and budget after 4 turns.
             said = (await _user_messages(session_id)) + [req.message]
             understood = await understanding.understood(
-                said, base=remembered, currency=(req.context.currency if req.context else None))
+                said, base=remembered, currency=(req.context.currency if req.context else None),
+                session=session_id)
             # Who they are shopping for, so a mixed collection comes back as
             # theirs rather than half somebody else's.
             identity.set_audience(next(

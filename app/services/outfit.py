@@ -803,23 +803,6 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
 
 # What goes with what, by the store's own categories. First match wins, and the
 # piece being looked at is never paired with another of its own kind.
-# What goes with what, by the part each piece plays rather than by the name the
-# store files it under. These are roles from the product's own name (see
-# CATEGORY_RULES): a shirt and a jumper are both "Top", a coat and a jacket are
-# both "Outerwear". Nothing here names a product, so it holds for any stock.
-COMPANIONS = {
-    "Dress": ("Outerwear", "Shoes", "Accessory", "Top"),
-    "Top": ("Bottoms", "Shoes", "Outerwear", "Accessory"),
-    "Bottoms": ("Top", "Shoes", "Outerwear", "Accessory"),
-    "Outerwear": ("Top", "Bottoms", "Dress", "Shoes"),
-    "Shoes": ("Dress", "Top", "Bottoms", "Accessory"),
-    "Accessory": ("Dress", "Top", "Bottoms", "Shoes"),
-    "Other": ("Top", "Bottoms", "Dress", "Shoes"),
-}
-DEFAULT_COMPANIONS = ("Top", "Bottoms", "Shoes", "Accessory")
-# Colours that sit with anything, so a look is never blocked on an exact match.
-NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
-LOOK_PIECES = 3
 
 
 def _colour_words(piece: dict) -> set[str]:
@@ -841,11 +824,6 @@ def _comes_in(piece: dict, colour: str | None) -> bool:
     wanted = {w for w in re.findall(r"[a-z]+", colour.lower()) if len(w) > 2}
     return bool(wanted & _colour_words(piece))
 
-
-def _shares_colour(piece: dict, colours: list) -> bool:
-    theirs = _colour_words(piece)
-    anchor = {w for c in colours for w in re.findall(r"[a-z]+", str(c).lower()) if len(w) > 2}
-    return bool(theirs & anchor) or bool(theirs & NEUTRALS)
 
 
 def _age_of(size: str | None) -> int | None:
@@ -1047,7 +1025,7 @@ STYLIST_TIMEOUT = 30
 
 
 async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budget, currency,
-                   wanted_colour, season) -> dict | None:
+                   wanted_colour, season, most: int | None = None) -> dict | None:
     """The look around `anchor`, chosen by the model from pieces that fit.
 
     Code only says what CAN go in - in stock, the child's size, for this child.
@@ -1077,6 +1055,8 @@ async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budge
         "look_on_screen": list(identity.look_on_screen()),
         "wants_colour": wanted_colour, "avoids_colours": list(identity.avoids_colour()),
         "season": season, "budget": budget, "currency": currency,
+        # Only where a panel has room for so many, never a styling rule.
+        **({"at_most_pieces": most} if most else {}),
         "candidates": candidates,
     }
     ask = [("system", _STYLIST), ("human", json.dumps(brief, ensure_ascii=False))]
@@ -1116,7 +1096,7 @@ async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budge
 
 
 async def complete_the_look(product: str, size: str | None = None,
-                            budget: float | None = None, pieces: int = LOOK_PIECES) -> dict:
+                            budget: float | None = None, pieces: int | None = None) -> dict:
     """The coordinated outfit around the piece a shopper is looking at.
 
     One companion per category - a cardigan, shoes, an accessory - in stock, for
@@ -1166,8 +1146,6 @@ async def complete_the_look(product: str, size: str | None = None,
     size = size or identity.wants_size() or next((s for s in anchor["sizes"] if s), None)
     ages = [a for p in stock for x in (p["sizes"] or []) if (a := _age_of(x))]
     oldest = max(ages) if ages else None
-    anchor_role = anchor.get("role") or _category(anchor["title"], None)
-    order = COMPANIONS.get(anchor_role, DEFAULT_COMPANIONS)
     # A shoe size is a number and says nothing about age, so ask the
     # conversation before giving up on knowing how old the child is.
     age = _age_of(size)
@@ -1210,47 +1188,14 @@ async def complete_the_look(product: str, size: str | None = None,
     # cannot be reached.
     styled = await _stylist(anchor, pool, age=age, size=size, audience=audience, budget=budget,
                             currency=catalogue.get("currency"), wanted_colour=wanted_colour,
-                            season=season)
+                            season=season, most=pieces)
+    # The look is the stylist's call alone: no rule-picked stand-in when it
+    # cannot answer - the agent says so and offers to try again.
+    if pool and styled is None:
+        return {"found": False, "asked_for": product, "reason": "stylist_unavailable",
+                "tell_customer": "The look could not be put together just now - say so and offer to try again."}
     picked = list(styled["pieces"]) if styled else []
     chosen_colour = styled["colours"] if styled else {}
-    for role in (() if styled else order):
-        matches = [p for p in pool if (p.get("role") or _category(p["title"], None)) == role]
-        if not matches:
-            continue
-        matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
-                                    _season_first(p, season),
-                                    0 if _shares_colour(p, anchor["colors"]) else 1,
-                                    p["price_from"] or 0))
-        picked.append(matches[0])
-        if len(picked) >= max(1, pieces):
-            break
-
-    # The named companions for this kind of piece may not all be in stock in
-    # their size; rather than a look of one, fill up from whatever else suits.
-    if not styled and len(picked) < max(1, pieces):
-        taken = {p.get("role") or _category(p["title"], None) for p in picked}
-        rest = [p for p in pool
-                if (p.get("role") or _category(p["title"], None)) in order
-                and (p.get("role") or _category(p["title"], None)) not in taken]
-        rest.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
-                                 0 if _shares_colour(p, anchor["colors"]) else 1,
-                                 p["price_from"] or 0))
-        for piece in rest:
-            role = piece.get("role") or _category(piece["title"], None)
-            if role in taken:
-                continue
-            picked.append(piece)
-            taken.add(role)
-            if len(picked) >= max(1, pieces):
-                break
-
-    # A budget is what the shopper will spend on the look, not on each piece:
-    # four things under 400 each came to 730. Drop the dearest companions until
-    # the whole thing fits, keeping the piece they asked about.
-    if budget and not styled:
-        allowed = float(budget)
-        while picked and (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked) > allowed:
-            picked.pop(max(range(len(picked)), key=lambda i: picked[i]["price_from"] or 0))
 
     def line(piece: dict) -> dict:
         """One line of the look: a colour and size the shop sells together.
@@ -1279,14 +1224,10 @@ async def complete_the_look(product: str, size: str | None = None,
             wanted_size = _size_for_age(fits or sizes, age, oldest, span)
             choices = [c for c in real if c["size"] == wanted_size] or real
 
-        # The stylist's colour where it comes in this size; otherwise their
-        # colour, then one that sits with the anchor, then whatever is there.
+        # The stylist's colour where this size comes in it, else the one they asked for.
         theirs = [c for c in choices if (c["color"] or "") == chosen_colour.get(piece["handle"])]
         if not theirs:
             theirs = [c for c in choices if _comes_in({"colors": [c["color"] or ""]}, wanted_colour)]
-        if not theirs:
-            shared = {x.strip().lower() for x in anchor["colors"]} | NEUTRALS
-            theirs = [c for c in choices if (c["color"] or "").strip().lower() in shared]
         picked_one = (theirs or choices)[0]
         if picked_one["color"]:
             item["color"] = picked_one["color"]

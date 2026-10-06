@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # Room for the backup model when the main one is down: cut off at 8s, the
 # word lists read "she doesn't like pink" as Colour: Pink.
 TIMEOUT_SECONDS = 20
+# The latest reading per conversation, kept for a turn the model cannot read.
+_last_reading: dict[str, dict] = {}
+_LAST_READINGS = 2000
 
 _PROMPT = """You read a shopper's messages to a children's clothing shop and note what they want.
 Return ONLY a JSON object with these keys, each a short string or null when not said:
@@ -82,8 +85,14 @@ def _fields(found: dict) -> dict:
     }
 
 
-async def understood(messages: list[str], base: dict | None = None, currency: str | None = None) -> dict:
-    """needs.understood(), read by the model. Same shape; falls back to it on failure."""
+async def understood(messages: list[str], base: dict | None = None, currency: str | None = None,
+                     session: str | None = None) -> dict:
+    """needs.understood(), read by the model. Same shape.
+
+    When the model cannot be reached, the last reading of this conversation is
+    kept as it was. The word lists it once fell back to read "she doesn't like
+    pink" as Colour: Pink - a guess is worse than standing still.
+    """
     said = [m for m in messages if m and m.strip()]
     if not said:
         return needs.understood(messages, base=base, currency=currency)
@@ -104,7 +113,12 @@ async def understood(messages: list[str], base: dict | None = None, currency: st
         found = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
         if not isinstance(found, dict):
             raise ValueError("not an object")
-        return _fields(found)
+        result = _fields(found)
+        if session:
+            _last_reading[session] = result
+            while len(_last_reading) > _LAST_READINGS:
+                _last_reading.pop(next(iter(_last_reading)))
+        return result
     except Exception:  # noqa: BLE001 - the panel must never cost the answer
-        logger.warning("Model read of the shopper's needs failed; using the word lists", exc_info=True)
-        return needs.understood(messages, base=base, currency=currency)
+        logger.warning("Model read of the shopper's needs failed; keeping the last reading", exc_info=True)
+        return _last_reading.get(session) or _fields(dict(kept))
