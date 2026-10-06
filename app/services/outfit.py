@@ -290,12 +290,17 @@ async def browse_catalogue() -> dict:
     return copy.deepcopy(result)
 
 
-async def store_sizes() -> list[str]:
-    """Every size this shop sells something in stock in, smallest first - the
-    facts the agent chooses sizes from; it decides which suit a child."""
+async def pieces_per_size(audience: str | None = None) -> dict[str, int]:
+    """How many in-stock pieces for this child come in each size the shop sells,
+    smallest size first - "8Y: 24, 9Y: 2, 10Y: 27". Facts only: which sizes suit
+    a child between sizes is the agent's call."""
     from app.services.size_finder import span_of
-    labels = {s for p in (await browse_catalogue())["products"] if p["in_stock"] for s in p["sizes"] or []}
-    return sorted(labels, key=lambda s: (span_of(s) or (999, 999), s))
+    pool = _for_this_child([p for p in (await browse_catalogue())["products"] if p["in_stock"]], audience)
+    counts: dict[str, int] = {}
+    for p in pool:
+        for s in set(p["sizes"] or []):
+            counts[s] = counts.get(s, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (span_of(kv[0]) or (999, 999), kv[0])))
 
 
 # ── Adding to the shopper's bag ────────────────────────────────────────────

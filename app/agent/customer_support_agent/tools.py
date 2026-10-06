@@ -929,9 +929,10 @@ async def browse_in_size(size: str, also: list[str] | None = None) -> str:
     say plainly that nothing comes in that size and offer the nearest.
     Name the pieces with their prices - a count on its own ("8 pieces come in
     12Y") leaves the shopper reading a number with unnamed cards beside it.
-    Sizes are your call: store_sizes lists every size this shop sells. When the
-    child falls between them (a 9 year old where most pieces go 8Y and 10Y),
-    pass the sizes you judge right for them in also - the pieces come back
+    Sizes are your call: pieces_in_each_size says how many of their pieces come
+    in each size this shop sells. A child's age is not always a size the range
+    is made in (9Y: 2 pieces, 8Y: 24, 10Y: 27) - when it is not, call again with
+    the sizes you judge right for them in also, and the pieces come back
     marked in_another_size_asked with in_this_size saying which. Say so
     honestly ("comes in 8Y or 10Y"); never call another size theirs.
     in_exactly_this_size counts the exact ones. When
@@ -941,7 +942,7 @@ async def browse_in_size(size: str, also: list[str] | None = None) -> str:
     try:
         found = _for_the_model(await shelf("browse_in_size", size, also=also))
         if isinstance(found, dict):
-            found["store_sizes"] = await outfit.store_sizes()
+            found["pieces_in_each_size"] = await outfit.pieces_per_size(identity.shopping_for())
         return json.dumps(found, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_in_size", exc)
