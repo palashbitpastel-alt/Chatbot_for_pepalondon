@@ -652,12 +652,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         # Their size from the chat when the agent did not pass one on.
         size = size.strip() or (identity.wants_size() or "")
         if size:
-            await _with_their_size(result, size)
+            await _with_their_size(result, size, exclude=exclude)
         # Older than our range for them: the pieces in the largest size we make,
         # so the nearest look is in hand rather than a lone pair of plimsolls.
         oldest = (result.get("nothing_else_fits") or {}).get("oldest_we_make")
         if oldest:
-            await _with_their_size(result, f"{oldest}Y", nearest=True)
+            await _with_their_size(result, f"{oldest}Y", nearest=True, exclude=exclude)
         # Whether each piece is nightwear, read the same way everywhere else does.
         for p in result.get("products") or []:
             p["sleepwear"] = occasions.is_sleepwear(p.get("title") or "")
@@ -666,7 +666,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         return _fail("suggest_pieces", exc)
 
 
-async def _with_their_size(result: dict, size: str, nearest: bool = False) -> None:
+async def _with_their_size(result: dict, size: str, nearest: bool = False,
+                           exclude: list[str] | None = None) -> None:
     """Add what the shop sells in this child's own size to a few suggestions.
 
     The suggestions are one piece per part of an outfit, so a 3-month-old was
@@ -676,7 +677,10 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False) -> No
         found = await shelf("browse_in_size", size)
     except (ShopifyError, KeyError, ValueError):
         return
-    everything = [p for p in (found or {}).get("products") or [] if p.get("product_id")]
+    # What they turned down stays out here too: "I don't like these" brought the
+    # first shirt straight back as one of the pieces in his size.
+    everything = [p for p in (found or {}).get("products") or []
+                  if p.get("product_id") and not outfit.turned_down(p, exclude)]
     # The kind they asked for is the kind added: asked for dresses, the skirts
     # and jumpers in her size are not the answer.
     kind = ((result.get("known") or {}).get("category") or "").strip().lower()

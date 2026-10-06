@@ -702,9 +702,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     # a piece tagged for this child over one that merely suits either.
     # Pieces they have already seen and turned down ("I don't like these"): left
     # out, by handle or title, so the next set is genuinely new.
-    seen = {str(x).strip().lower() for x in exclude or [] if str(x).strip()}
-    if seen:
-        pool = [p for p in pool if p["handle"].lower() not in seen and p["title"].lower() not in seen]
+    if exclude:
+        pool = [p for p in pool if not turned_down(p, exclude)]
 
     # A colour they turned down ("she doesn't like pink"): pieces that only come
     # in it go to the back and say so - kept, so the agent can still explain.
@@ -815,6 +814,21 @@ def _colour_words(piece: dict) -> set[str]:
     for value in list(piece.get("colors") or []) + [piece.get("title") or ""]:
         words |= {w for w in re.findall(r"[a-z]+", str(value).lower()) if len(w) > 2}
     return words
+
+
+def _name_forms(text: str) -> set[str]:
+    """A product name as the agent may write it: with or without the store's
+    size range - "George Check Shirt in Blue (12mths- 10yrs)" is the same shirt
+    without its brackets, and exact matching let it come straight back."""
+    whole = " ".join(str(text or "").lower().split())
+    bare = re.sub(r"\s*\([^)]*\)\s*$", "", whole).strip()
+    return {whole, bare} - {""}
+
+
+def turned_down(piece: dict, names: list[str] | None) -> bool:
+    """Whether this piece is one of the names they have already seen and turned down."""
+    seen = set().union(*(_name_forms(n) for n in names or [])) if names else set()
+    return bool(seen) and bool((_name_forms(piece.get("title") or "") | {str(piece.get("handle") or "").lower()}) & seen)
 
 
 def _comes_in(piece: dict, colour: str | None) -> bool:
