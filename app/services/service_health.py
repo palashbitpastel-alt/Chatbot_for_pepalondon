@@ -88,7 +88,7 @@ async def ai_status() -> dict:
     """Whether the AI can answer: DeepSeek's balance, plus the Gemini backup if set."""
     status = await _deepseek_status()
     if settings.GEMINI_API_KEY:
-        status["backup"] = f"Gemini ({settings.GEMINI_MODEL}) answers whenever DeepSeek cannot"
+        status["backup"] = f"Gemini ({settings.GEMINI_MODEL.replace(',', ', then ')}) answers whenever DeepSeek cannot"
         if status.get("ok") is False:
             status["reason"] = status.get("reason", "") + " Gemini is answering chats meanwhile."
     return status

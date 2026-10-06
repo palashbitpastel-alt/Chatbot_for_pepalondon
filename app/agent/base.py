@@ -103,10 +103,14 @@ class _GeminiChat(ChatOpenAI):
         return payload
 
 
-def _gemini(temperature: float, max_tokens: int | None) -> ChatOpenAI:
+def _gemini_models() -> list[str]:
+    return [m.strip() for m in settings.GEMINI_MODEL.split(",") if m.strip()]
+
+
+def _gemini(model: str, temperature: float, max_tokens: int | None) -> ChatOpenAI:
     extra = {"reasoning_effort": settings.GEMINI_REASONING_EFFORT} if settings.GEMINI_REASONING_EFFORT else None
     return _GeminiChat(
-        model=settings.GEMINI_MODEL,
+        model=model,
         api_key=settings.GEMINI_API_KEY,
         base_url=settings.GEMINI_BASE_URL,
         temperature=temperature,
@@ -121,15 +125,16 @@ def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> Runnab
     """The shared chat model: DeepSeek, with Gemini as the backup.
 
     A DeepSeek call that fails (out of credit, key rejected, down) is retried on
-    Gemini when GEMINI_API_KEY is set, so a shopper still gets an answer; the next
-    call tries DeepSeek first again. bind_tools() passes through to both models.
+    each Gemini model in GEMINI_MODEL in turn when GEMINI_API_KEY is set, so a
+    shopper still gets an answer; the next call tries DeepSeek first again.
+    bind_tools() passes through to every model in the chain.
     """
-    if not settings.DEEPSEEK_API_KEY and settings.GEMINI_API_KEY:
-        return _gemini(temperature, max_tokens)
-    primary = _deepseek(temperature, max_tokens)
-    if not settings.GEMINI_API_KEY:
-        return primary
-    return primary.with_fallbacks([_gemini(temperature, max_tokens)])
+    chain = [_deepseek(temperature, max_tokens)] if settings.DEEPSEEK_API_KEY else []
+    if settings.GEMINI_API_KEY:
+        chain += [_gemini(m, temperature, max_tokens) for m in _gemini_models()]
+    if len(chain) < 2:
+        return chain[0] if chain else _deepseek(temperature, max_tokens)
+    return chain[0].with_fallbacks(chain[1:])
 
 
 def build_agent_executor(

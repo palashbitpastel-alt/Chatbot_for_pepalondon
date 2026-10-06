@@ -53,7 +53,10 @@ class Settings(BaseSettings):
     # Gemini answers everything. Empty key: no backup.
     GEMINI_API_KEY: str = ""
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    GEMINI_MODEL: str = "gemini-flash-latest"
+    # One model or several, comma separated, tried in this order. On the free tier
+    # a model is often busy (503) or out of quota for the minute (429), so the
+    # next one answers. Flash-Lite first: it has the most free requests.
+    GEMINI_MODEL: str = "gemini-flash-lite-latest,gemini-flash-latest"
     # Gemini thinks before it answers, and that thinking comes out of max_tokens;
     # "low" keeps it short so a small JSON answer is not cut off.
     GEMINI_REASONING_EFFORT: str = "low"
