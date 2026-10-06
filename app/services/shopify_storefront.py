@@ -1150,31 +1150,48 @@ async def products_in_size(size: str, limit: int = 12) -> dict:
         return {"found": False, "asked_for": size, "reason": "not_a_size"}
     currency = (await shop_info())["currency"]
     matches: list[dict] = []
+    nearest: list[dict] = []
     cursor: str | None = None
+
+    def sized(node: dict, low: int, high: int) -> list[dict]:
+        return [v for v in node["variants"]["nodes"]
+                if v.get("availableForSale")
+                and (span := span_of(_size_of(v) or "")) is not None
+                and span[0] <= high and low <= span[1]]
+
     for _ in range(SIZE_SCAN_PAGES):
         page = (await graphql(SIZE_SCAN, {"query": sellable(), "first": SIZE_SCAN_PAGE,
                                           "cursor": cursor, "variants": VARIANT_LIMIT}))["products"]
         for node in page["nodes"]:
-            fits = [v for v in node["variants"]["nodes"]
-                    if v.get("availableForSale")
-                    and (span := span_of(_size_of(v) or "")) is not None
-                    and span[0] <= wanted[1] and wanted[0] <= span[1]]
-            if not fits:
+            fits = sized(node, wanted[0], wanted[1])
+            # Not made in it, but in the size either side: most of a range goes
+            # 8Y -> 10Y, and "for a 9 year old" found two pieces out of dozens.
+            # One rung on the size ladder either way, the same for 3M as for 9Y.
+            close = [] if fits else sized(node, wanted[0] - 1, wanted[1] + 1)
+            if not (fits or close):
                 continue
+            chosen = fits or close
             product = _public_product(node, currency)
-            product["variants"] = [_public_variant(v, node) for v in fits]
-            product["in_this_size"] = sorted({_size_of(v) for v in fits if _size_of(v)})
-            product["variant_id"] = fits[0].get("legacyResourceId")
-            product["price_from"] = round(min(float(v["price"]) for v in fits), 2)
-            matches.append(product)
+            product["variants"] = [_public_variant(v, node) for v in chosen]
+            product["in_this_size"] = sorted({_size_of(v) for v in chosen if _size_of(v)})
+            product["variant_id"] = chosen[0].get("legacyResourceId")
+            product["price_from"] = round(min(float(v["price"]) for v in chosen), 2)
+            if close:
+                product["nearest_size"] = True
+                nearest.append(product)
+            else:
+                matches.append(product)
         if not page["pageInfo"]["hasNextPage"]:
             break
         cursor = page["pageInfo"]["endCursor"]
+    exact = len(matches)
+    matches += nearest
     return {
         "found": bool(matches),
         "size": size,
         "currency": currency,
         "count": len(matches),
+        "in_exactly_this_size": exact,
         "more_available": len(matches) > limit,
         "products": matches[:limit],
     }
