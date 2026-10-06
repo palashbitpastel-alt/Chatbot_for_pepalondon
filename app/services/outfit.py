@@ -934,7 +934,10 @@ def _numbered_size_fits(piece: dict, age: int | None, oldest: int | None,
     """
     if age is None or not span or not oldest:
         return True
-    sizes = [x for x in (piece.get("sizes") or []) if not re.search(r"\d\s*[MY]\b", x.strip().upper())]
+    # A belt in "S / 60cm" or a hat in "56cm" is measured, not shoe-sized: read
+    # as a shoe, every belt in the shop was too big for a five year old.
+    sizes = [x for x in (piece.get("sizes") or [])
+             if not re.search(r"\d\s*[MY]\b", x.strip().upper()) and "cm" not in x.lower()]
     numbers = _numbers_in(sizes)
     if not numbers or len(sizes) != len(piece.get("sizes") or []):
         return True                     # sized by age, or not sized at all
@@ -1123,8 +1126,11 @@ async def complete_the_look(product: str, size: str | None = None,
     def rank(p: dict, look: list[dict]) -> tuple:
         """How well a piece suits the look so far - an accessory first by whether
         it finishes a part already in it - then their colour, season, price."""
-        in_look = {anchor_role, *(role_of(x) for x in look)}
-        finishes = 0 if role_of(p) != "Accessory" or set(parts.worn_with(p["category"])) & in_look else 1
+        # An accessory ranks by the most central part it finishes: a belt
+        # finishing the trousers before socks finishing the shoes.
+        in_look = [anchor_role, *(r for r in order if r in {role_of(x) for x in look})]
+        finished = [i for i, r in enumerate(in_look) if r in parts.worn_with(p["category"])]
+        finishes = 0 if role_of(p) != "Accessory" else min(finished, default=len(in_look))
         # An accessory picks up a colour already in the look - a brown belt
         # with brown boots - not only the anchor's.
         if role_of(p) == "Accessory":
@@ -1170,8 +1176,12 @@ async def complete_the_look(product: str, size: str | None = None,
     if budget:
         allowed = float(budget)
         spent = lambda: (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked)  # noqa: E731
+        # The layer goes first, then the accessory, and only then a main piece -
+        # dearest first within each: dropping the boots for the belt left a look
+        # with no shoes.
         while picked and spent() > allowed:
-            picked.pop(max(range(len(picked)), key=lambda i: picked[i]["price_from"] or 0))
+            picked.pop(max(range(len(picked)), key=lambda i: (_FILL_FIRST.get(role_of(picked[i]), 1),
+                                                              picked[i]["price_from"] or 0)))
         # What dropping the dearest piece left over still dresses the look: a
         # belt in the ₹3,100 a jacket freed beats handing the money back.
         while len(picked) < max(1, pieces):
