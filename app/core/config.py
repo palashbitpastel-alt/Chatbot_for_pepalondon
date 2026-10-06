@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-chat"
 
+    # Backup LLM (Google Gemini, through its OpenAI-compatible endpoint). Used only
+    # when a DeepSeek call fails - no credit, key rejected, outage - so chats keep
+    # working; DeepSeek answers again as soon as it can. With no DeepSeek key set,
+    # Gemini answers everything. Empty key: no backup.
+    GEMINI_API_KEY: str = ""
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    GEMINI_MODEL: str = "gemini-flash-latest"
+    # Gemini thinks before it answers, and that thinking comes out of max_tokens;
+    # "low" keeps it short so a small JSON answer is not cut off.
+    GEMINI_REASONING_EFFORT: str = "low"
+
     # The storefront widget can send who is signed in, but that block comes from
     # the browser and can say anything. Off by default: with it on, anyone who
     # knows a shopper's email can POST it and read that shopper's order history.

@@ -13,6 +13,7 @@ from typing import Any
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
@@ -55,8 +56,11 @@ class Agent:
     finalise: AgentFinalise | None = None
 
 
-def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> ChatOpenAI:
-    """The shared DeepSeek (OpenAI-compatible) chat model."""
+# Room for Gemini's thinking on top of the answer itself, which shares max_tokens.
+_GEMINI_THINKING_TOKENS = 1024
+
+
+def _deepseek(temperature: float, max_tokens: int | None) -> ChatOpenAI:
     return ChatOpenAI(
         model=settings.DEEPSEEK_MODEL,
         api_key=settings.DEEPSEEK_API_KEY,
@@ -67,6 +71,35 @@ def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> ChatOp
         timeout=60,
         max_retries=1,
     )
+
+
+def _gemini(temperature: float, max_tokens: int | None) -> ChatOpenAI:
+    extra = {"reasoning_effort": settings.GEMINI_REASONING_EFFORT} if settings.GEMINI_REASONING_EFFORT else None
+    return ChatOpenAI(
+        model=settings.GEMINI_MODEL,
+        api_key=settings.GEMINI_API_KEY,
+        base_url=settings.GEMINI_BASE_URL,
+        temperature=temperature,
+        max_tokens=max_tokens + _GEMINI_THINKING_TOKENS if max_tokens else None,
+        extra_body=extra,
+        timeout=60,
+        max_retries=1,
+    )
+
+
+def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> Runnable:
+    """The shared chat model: DeepSeek, with Gemini as the backup.
+
+    A DeepSeek call that fails (out of credit, key rejected, down) is retried on
+    Gemini when GEMINI_API_KEY is set, so a shopper still gets an answer; the next
+    call tries DeepSeek first again. bind_tools() passes through to both models.
+    """
+    if not settings.DEEPSEEK_API_KEY and settings.GEMINI_API_KEY:
+        return _gemini(temperature, max_tokens)
+    primary = _deepseek(temperature, max_tokens)
+    if not settings.GEMINI_API_KEY:
+        return primary
+    return primary.with_fallbacks([_gemini(temperature, max_tokens)])
 
 
 def build_agent_executor(

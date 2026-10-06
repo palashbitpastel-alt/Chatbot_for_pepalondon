@@ -196,6 +196,7 @@ async function loadHealth() {
     box.className = "status-line " + (ai.ok === false ? "bad" : ai.ok ? "good" : "");
     box.textContent = ai.ok ? `AI assistant: working${ai.balance ? " · balance " + ai.balance : ""}`
       : `AI assistant: ${ai.reason || "status unknown"}${ai.balance ? " (balance " + ai.balance + ")" : ""}`;
+    if (ai.backup) box.textContent += ` · backup: ${ai.backup}`;
     if (last) box.textContent += ` · Last failed chat ${last.minutes_ago} min ago: ${last.reason}`;
   } catch (e) { box.hidden = true; }
 }

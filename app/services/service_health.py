@@ -85,7 +85,19 @@ def record(kind: str, exc: BaseException) -> None:
 
 
 async def ai_status() -> dict:
-    """Whether the AI account can answer, from its balance - which costs nothing."""
+    """Whether the AI can answer: DeepSeek's balance, plus the Gemini backup if set."""
+    status = await _deepseek_status()
+    if settings.GEMINI_API_KEY:
+        status["backup"] = f"Gemini ({settings.GEMINI_MODEL}) answers whenever DeepSeek cannot"
+        if status.get("ok") is False:
+            status["reason"] = status.get("reason", "") + " Gemini is answering chats meanwhile."
+    return status
+
+
+async def _deepseek_status() -> dict:
+    """Whether the DeepSeek account can answer, from its balance - which costs nothing."""
+    if not settings.DEEPSEEK_API_KEY:
+        return {"ok": None, "reason": "No DEEPSEEK_API_KEY set."}
     base = (settings.DEEPSEEK_BASE_URL or "https://api.deepseek.com").rstrip("/")
     if base.endswith("/v1"):
         base = base[:-3]
