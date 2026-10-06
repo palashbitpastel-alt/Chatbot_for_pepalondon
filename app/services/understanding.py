@@ -17,7 +17,9 @@ from app.services import needs
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_SECONDS = 8
+# Room for the backup model when the main one is down: cut off at 8s, the
+# word lists read "she doesn't like pink" as Colour: Pink.
+TIMEOUT_SECONDS = 20
 
 _PROMPT = """You read a shopper's messages to a children's clothing shop and note what they want.
 Return ONLY a JSON object with these keys, each a short string or null when not said:

@@ -6,6 +6,7 @@ the executor wiring and the chat-history conversion all live here so the agents
 stay thin and behave consistently.
 """
 
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -60,8 +61,47 @@ class Agent:
 _GEMINI_THINKING_TOKENS = 1024
 
 
+# While DeepSeek is out of credit or refuses its key, every call would wait for
+# that refusal before Gemini answered - long enough that the shopper-reading
+# call timed out and fell back to word lists ("doesn't like pink" -> Colour:
+# Pink). After such a refusal Gemini answers alone for a while; then DeepSeek
+# is tried again, so a top-up takes effect by itself.
+DEEPSEEK_REST_SECONDS = 10 * 60
+_deepseek_resting_until = 0.0
+
+
+def _deepseek_refused(exc: BaseException) -> bool:
+    status = getattr(exc, "status_code", None)
+    return status in (401, 402) or "insufficient balance" in str(exc).lower()
+
+
+class _DeepSeekChat(ChatOpenAI):
+    """ChatOpenAI that notes when DeepSeek refuses for credit or key."""
+
+    async def _agenerate(self, *args: Any, **kwargs: Any):
+        try:
+            return await super()._agenerate(*args, **kwargs)
+        except Exception as exc:
+            _note_refusal(exc)
+            raise
+
+    async def _astream(self, *args: Any, **kwargs: Any):
+        try:
+            async for chunk in super()._astream(*args, **kwargs):
+                yield chunk
+        except Exception as exc:
+            _note_refusal(exc)
+            raise
+
+
+def _note_refusal(exc: BaseException) -> None:
+    global _deepseek_resting_until
+    if _deepseek_refused(exc) and settings.GEMINI_API_KEY:
+        _deepseek_resting_until = time.monotonic() + DEEPSEEK_REST_SECONDS
+
+
 def _deepseek(temperature: float, max_tokens: int | None) -> ChatOpenAI:
-    return ChatOpenAI(
+    return _DeepSeekChat(
         model=settings.DEEPSEEK_MODEL,
         api_key=settings.DEEPSEEK_API_KEY,
         base_url=settings.DEEPSEEK_BASE_URL,
@@ -129,7 +169,8 @@ def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> Runnab
     shopper still gets an answer; the next call tries DeepSeek first again.
     bind_tools() passes through to every model in the chain.
     """
-    chain = [_deepseek(temperature, max_tokens)] if settings.DEEPSEEK_API_KEY else []
+    resting = time.monotonic() < _deepseek_resting_until
+    chain = [_deepseek(temperature, max_tokens)] if settings.DEEPSEEK_API_KEY and not resting else []
     if settings.GEMINI_API_KEY:
         chain += [_gemini(m, temperature, max_tokens) for m in _gemini_models()]
     if len(chain) < 2:
