@@ -370,6 +370,9 @@ async def product_details(product: str, colour: str = "", size: str = "") -> str
     it is listed in stock_by_colour[colour].in_stock.
     """
     try:
+        # Their size from the chat when the agent did not pass one on, so the
+        # card opens with it picked - "she's 5" should not need saying twice.
+        size = size.strip() or (identity.wants_size() or "")
         return json.dumps(await extras.product_details(product, colour=colour, size=size),
                           ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
