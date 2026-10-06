@@ -73,9 +73,39 @@ def _deepseek(temperature: float, max_tokens: int | None) -> ChatOpenAI:
     )
 
 
+# Google's documented stand-in for a tool call whose signature was never seen
+# (one DeepSeek made, before a fallback mid-turn).
+_NO_SIGNATURE = {"google": {"thought_signature": "skip_thought_signature_validator"}}
+
+
+class _GeminiChat(ChatOpenAI):
+    """ChatOpenAI that hands Gemini back its thought signatures.
+
+    Gemini 3 signs every tool call it makes (``extra_content`` on the call) and
+    refuses the next request - "Function call is missing a thought_signature" -
+    unless the history carries that signature back. LangChain keeps the raw call
+    in ``additional_kwargs`` but rebuilds the outgoing tool calls without it, so
+    the agent's second step always failed. The signature is put back here.
+    """
+
+    def _get_request_payload(self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any) -> dict:
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        signed = {
+            raw.get("id"): raw["extra_content"]
+            for message in self._convert_input(input_).to_messages()
+            if isinstance(message, AIMessage)
+            for raw in message.additional_kwargs.get("tool_calls") or []
+            if isinstance(raw, dict) and raw.get("extra_content")
+        }
+        for message in payload.get("messages") or []:
+            for call in message.get("tool_calls") or []:
+                call.setdefault("extra_content", signed.get(call.get("id")) or _NO_SIGNATURE)
+        return payload
+
+
 def _gemini(temperature: float, max_tokens: int | None) -> ChatOpenAI:
     extra = {"reasoning_effort": settings.GEMINI_REASONING_EFFORT} if settings.GEMINI_REASONING_EFFORT else None
-    return ChatOpenAI(
+    return _GeminiChat(
         model=settings.GEMINI_MODEL,
         api_key=settings.GEMINI_API_KEY,
         base_url=settings.GEMINI_BASE_URL,
