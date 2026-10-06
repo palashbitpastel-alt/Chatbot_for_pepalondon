@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.services import compare, extras, handbook, market, multi_buy, occasions, order_changes, outfit, shopify_storefront, size_finder, store_profile
+from app.services import compare, extras, handbook, market, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
 from app.services import shopper_identity as identity
 from app.services.shopify_client import ShopifyError, store_domain
 
@@ -595,8 +595,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                          age: float = 0, budget: float = 0, category: str = "",
                          size: str = "", min_price: float = 0, avoid_colour: str = "",
                          exclude: list[str] | None = None) -> str:
-    """A few real pieces that fit what you know so far. Use on EVERY turn of an
-    outfit, occasion or gift request - before you ask anything.
+    """Every in-stock piece that fits what you know so far, best fit first. Use
+    on EVERY turn of an outfit, occasion or gift request - before you ask
+    anything. You choose what to show from it: each piece says its part of an
+    outfit (part), what the store's pieces were read as worn for (worn_for) and
+    when (seasons) - judge the fit yourself; nothing has been filtered out on
+    those.
 
     Fill in only what the shopper has told you in this conversation and leave the
     rest empty (age 0, budget 0). budget is the most a piece may cost, min_price
@@ -654,7 +658,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     """
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
-                                             category=category, limit=0 if category else 4,
+                                             category=category, limit=0,
                                              min_price=min_price or None, avoid_colour=avoid_colour,
                                              exclude=exclude)
         # Their size from the chat when the agent did not pass one on.
@@ -668,7 +672,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
             await _with_their_size(result, f"{oldest}Y", nearest=True, exclude=exclude)
         # Whether each piece is nightwear, read the same way everywhere else does.
         for p in result.get("products") or []:
-            p["sleepwear"] = occasions.is_sleepwear(p.get("title") or "")
+            p["sleepwear"] = outfit._is_sleepwear(p)
         return json.dumps(result, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("suggest_pieces", exc)
@@ -1328,8 +1332,8 @@ def _against_their_budget(data):
     # Nightwear marked on every listing, not only suggestions: a "night dress"
     # was offered among cheaper party dresses from a plain search.
     for p in products if isinstance(products, list) else []:
-        if isinstance(p, dict) and p.get("title"):
-            p["sleepwear"] = occasions.is_sleepwear(p["title"])
+        if isinstance(p, dict) and p.get("handle"):
+            p["sleepwear"] = outfit._is_sleepwear(p)
     budget = identity.their_budget()
     if not budget or not isinstance(products, list):
         return data
