@@ -691,8 +691,13 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False) -> No
     fits = {str(p["product_id"]) for p in everything}
     picks = result.get("products") or []
     if not nearest:
+        # Which of its sizes is theirs rides along too, so the card opens on it:
+        # six shirts "in 8Y" all opened on "Choose size".
+        in_size = {str(p["product_id"]): p.get("in_this_size") for p in everything}
         for p in picks:
             p["in_their_size"] = str(p.get("product_id")) in fits
+            if p["in_their_size"] and in_size.get(str(p.get("product_id"))) and not p.get("in_this_size"):
+                p["in_this_size"] = in_size[str(p.get("product_id"))]
     shown = {str(p.get("product_id")) for p in picks}
     keep = ("product_id", "variant_id", "title", "category", "for", "price_from", "currency",
             "in_this_size", "image", "url")
