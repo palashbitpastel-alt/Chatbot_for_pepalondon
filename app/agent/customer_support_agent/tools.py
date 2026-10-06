@@ -616,7 +616,11 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
       Leave it empty for "an outfit" or a gift. Asked what we have for an
       occasion ("what do you have for her birthday"), pass the main kind that
       you judge suits this child and occasion, so they see several to choose
-      between rather than one of each part.
+      between rather than one of each part. other_kind=true: only a piece or
+      two of that kind comes in their size, so these are the other pieces we
+      have in it - show those that suit the occasion alongside, so they have a
+      real choice, and never say our range stops below their size while
+      pieces in it are listed.
     Returns in-stock pieces, best fit first - name each with its price. Given a
     size, the pieces sold in the child's own size (their_size) come back too, and
     every piece says in_their_size true/false: offer the ones they can wear now and
@@ -662,6 +666,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         return _fail("suggest_pieces", exc)
 
 
+FEW_OF_A_KIND = 3
+
+
 async def _with_their_size(result: dict, size: str, nearest: bool = False) -> None:
     """Add what the shop sells in this child's own size to a few suggestions.
 
@@ -672,15 +679,20 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False) -> No
         found = await shelf("browse_in_size", size)
     except (ShopifyError, KeyError, ValueError):
         return
-    theirs = [p for p in (found or {}).get("products") or [] if p.get("product_id")]
+    everything = [p for p in (found or {}).get("products") or [] if p.get("product_id")]
     # The kind they asked for is the kind added: asked for dresses, the skirts
     # and jumpers in her size are not the answer.
     kind = ((result.get("known") or {}).get("category") or "").strip().lower()
-    if kind:
-        theirs = [p for p in theirs if (p.get("category") or "").strip().lower() == kind]
-    if not theirs:
+    theirs = [p for p in everything if (p.get("category") or "").strip().lower() == kind] if kind else everything
+    # One dress in 12Y left a 12 year old's party with one product and a claim
+    # that the range stops at 10Y. With so few of that kind in their size, the
+    # other pieces in it ride along; the agent decides which suit the occasion.
+    others = [p for p in everything if p not in theirs] \
+        if kind and not nearest and len(theirs) < FEW_OF_A_KIND else []
+    if not theirs and not others:
         return
-    fits = {str(p["product_id"]) for p in theirs}
+    # Sold in their size, whatever its kind.
+    fits = {str(p["product_id"]) for p in everything}
     picks = result.get("products") or []
     if not nearest:
         for p in picks:
@@ -693,16 +705,20 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False) -> No
     else:
         result["their_size"] = size
     mark = {"largest_we_make": size} if nearest else {"in_their_size": True}
-    # Each variant's own price rides along: the market pricing converts
-    # price_from from them, and without them the dollars went out labelled INR.
-    # Its option, stock and photo too, so the card can open on a colour the
-    # shopper has not turned down.
-    result["products"] = picks + [{**{k: p.get(k) for k in keep}, **mark,
-                                   "variants": [{k: v.get(k) for k in
-                                                 ("variant_id", "price", "option", "available", "image")}
-                                                for v in p.get("variants") or []]}
-                                  for p in theirs[:SHELF_FOR_MODEL]
-                                  if str(p["product_id"]) not in shown]
+
+    def entry(p: dict, flags: dict) -> dict:
+        # Each variant's own price rides along: the market pricing converts
+        # price_from from them, and without them the dollars went out labelled INR.
+        # Its option, stock and photo too, so the card can open on a colour the
+        # shopper has not turned down.
+        return {**{k: p.get(k) for k in keep}, **flags,
+                "variants": [{k: v.get(k) for k in ("variant_id", "price", "option", "available", "image")}
+                             for v in p.get("variants") or []]}
+
+    result["products"] = picks + [entry(p, mark) for p in theirs[:SHELF_FOR_MODEL]
+                                  if str(p["product_id"]) not in shown] \
+        + [entry(p, {"in_their_size": True, "other_kind": True}) for p in others[:SHELF_FOR_MODEL]
+           if str(p["product_id"]) not in shown]
 
 
 @tool
