@@ -703,8 +703,8 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
     others = [p for p in everything if p not in theirs] if kind and not nearest else []
     if not theirs and not others:
         return
-    # Sold in their size, whatever its kind - not the size either side.
-    fits = {str(p["product_id"]) for p in everything if not p.get("nearest_size")}
+    # Sold in their size, whatever its kind.
+    fits = {str(p["product_id"]) for p in everything}
     picks = result.get("products") or []
     if not nearest:
         # Which of its sizes is theirs rides along too, so the card opens on it:
@@ -732,14 +732,9 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
                 "variants": [{k: v.get(k) for k in ("variant_id", "price", "option", "available", "image")}
                              for v in p.get("variants") or []]}
 
-    def flags(p: dict, base: dict) -> dict:
-        # The size either side is not their size: said, never folded into it.
-        return {**base, "in_their_size": False, "nearest_size": True} \
-            if p.get("nearest_size") and not nearest else base
-
-    result["products"] = picks + [entry(p, flags(p, mark)) for p in theirs[:SHELF_FOR_MODEL]
+    result["products"] = picks + [entry(p, mark) for p in theirs[:SHELF_FOR_MODEL]
                                   if str(p["product_id"]) not in shown] \
-        + [entry(p, flags(p, {"in_their_size": True, "other_kind": True})) for p in others[:SHELF_FOR_MODEL]
+        + [entry(p, {"in_their_size": True, "other_kind": True}) for p in others[:SHELF_FOR_MODEL]
            if str(p["product_id"]) not in shown]
 
 
@@ -923,7 +918,7 @@ async def list_categories() -> str:
 
 
 @tool
-async def browse_in_size(size: str) -> str:
+async def browse_in_size(size: str, also: list[str] | None = None) -> str:
     """Every piece that comes in ONE size and is in stock in it.
 
     size: as they said it - "12Y", "18M", "5-6Y". Use whenever a size is the
@@ -934,15 +929,20 @@ async def browse_in_size(size: str) -> str:
     say plainly that nothing comes in that size and offer the nearest.
     Name the pieces with their prices - a count on its own ("8 pieces come in
     12Y") leaves the shopper reading a number with unnamed cards beside it.
-    nearest_size=true: not made in that exact size but in the size either side
-    (in_this_size says which - a 9 year old: 8Y or 10Y). Say so honestly and
-    help them choose ("comes in 8Y or 10Y - 10Y gives room to grow"); never
-    call it their size. in_exactly_this_size counts the exact ones. When
+    Sizes are your call: store_sizes lists every size this shop sells. When the
+    child falls between them (a 9 year old where most pieces go 8Y and 10Y),
+    pass the sizes you judge right for them in also - the pieces come back
+    marked in_another_size_asked with in_this_size saying which. Say so
+    honestly ("comes in 8Y or 10Y"); never call another size theirs.
+    in_exactly_this_size counts the exact ones. When
     they asked for a kind of piece, name the ones of that kind; when they asked
     generally, name the range, accessories included.
     """
     try:
-        return json.dumps(_for_the_model(await shelf("browse_in_size", size)), ensure_ascii=False)
+        found = _for_the_model(await shelf("browse_in_size", size, also=also))
+        if isinstance(found, dict):
+            found["store_sizes"] = await outfit.store_sizes()
+        return json.dumps(found, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_in_size", exc)
 
@@ -959,13 +959,13 @@ SHELF_FOR_MODEL = 12
 SHELF_TOOLS = ("browse_in_size", "browse_category")
 
 
-async def shelf(tool: str, arg: str) -> dict:
+async def shelf(tool: str, arg: str, also: list[str] | None = None) -> dict:
     """Every product on one shelf, for whoever the shopper is shopping for, in
     their colour first. The audience and colour are read from the current turn."""
     if tool == "browse_in_size":
         # The size scan reads every product anyway; keep all it found.
         found = await shopify_storefront.products_in_size(
-            arg, limit=shopify_storefront.SIZE_SCAN_PAGES * shopify_storefront.SIZE_SCAN_PAGE)
+            arg, limit=shopify_storefront.SIZE_SCAN_PAGES * shopify_storefront.SIZE_SCAN_PAGE, also=also)
     elif tool == "browse_category":
         found = await shopify_storefront.category_products(arg, limit=shopify_storefront.SHELF_LIMIT)
     else:
@@ -974,7 +974,7 @@ async def shelf(tool: str, arg: str) -> dict:
     if isinstance(found, dict) and found.get("found") is not False:
         found["count"] = len(found.get("products") or [])
         # How to fetch this shelf again: the storefront sends it back for more.
-        found["shelf"] = {"tool": tool, "arg": arg, "for": identity.shopping_for(),
+        found["shelf"] = {"tool": tool, "arg": arg, "also": list(also or []), "for": identity.shopping_for(),
                           "colour": identity.wants_colour()}
     return found
 

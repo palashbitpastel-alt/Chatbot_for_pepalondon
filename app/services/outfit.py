@@ -290,6 +290,14 @@ async def browse_catalogue() -> dict:
     return copy.deepcopy(result)
 
 
+async def store_sizes() -> list[str]:
+    """Every size this shop sells something in stock in, smallest first - the
+    facts the agent chooses sizes from; it decides which suit a child."""
+    from app.services.size_finder import span_of
+    labels = {s for p in (await browse_catalogue())["products"] if p["in_stock"] for s in p["sizes"] or []}
+    return sorted(labels, key=lambda s: (span_of(s) or (999, 999), s))
+
+
 # ── Adding to the shopper's bag ────────────────────────────────────────────
 # The cart lives in the shopper's browser session, not here, so nothing below
 # writes to it. What they asked for is resolved to exact, buyable variants, and

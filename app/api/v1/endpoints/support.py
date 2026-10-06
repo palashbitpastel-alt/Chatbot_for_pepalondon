@@ -407,6 +407,8 @@ class ShelfRequest(BaseModel):
     arg: str = Field(max_length=200)
     for_: str | None = Field(default=None, alias="for", max_length=20)
     colour: str | None = Field(default=None, max_length=40)
+    # Other sizes the agent chose to look in for a size shelf.
+    also: list[str] = Field(default_factory=list, max_length=6)
     shown: list[str] = Field(default_factory=list, max_length=300)
     # How many more to send; 0 is everything that is left.
     limit: int = Field(default=8, ge=0, le=100)
@@ -432,7 +434,7 @@ async def support_more(req: ShelfRequest) -> dict:
     showing = market.set_showing(req.currency)
     try:
         await audience.ensure()
-        found = await market.localize(await tools.shelf(req.tool, req.arg))
+        found = await market.localize(await tools.shelf(req.tool, req.arg, also=req.also))
     except ShopifyError:
         logger.warning("Could not fetch more of shelf %s %s", req.tool, req.arg, exc_info=True)
         raise HTTPException(status_code=502, detail="Could not load more products") from None

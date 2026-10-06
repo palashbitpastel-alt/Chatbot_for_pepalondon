@@ -1137,7 +1137,7 @@ def _size_of(variant: dict) -> str | None:
     return None
 
 
-async def products_in_size(size: str, limit: int = 12) -> dict:
+async def products_in_size(size: str, limit: int = 12, also: list[str] | None = None) -> dict:
     """Everything buyable in one size - "12Y", "18M", "5-6Y".
 
     A size label covers a span ("11-12Y" includes 12Y), so sizes are compared as
@@ -1148,6 +1148,9 @@ async def products_in_size(size: str, limit: int = 12) -> dict:
     wanted = span_of(size)
     if wanted is None:
         return {"found": False, "asked_for": size, "reason": "not_a_size"}
+    # Other sizes the agent chose to look in as well (a 9 year old where the
+    # range goes 8Y -> 10Y): its judgement, read as spans like the first.
+    extra = [s for s in (span_of(x) for x in also or []) if s is not None]
     currency = (await shop_info())["currency"]
     matches: list[dict] = []
     nearest: list[dict] = []
@@ -1164,10 +1167,7 @@ async def products_in_size(size: str, limit: int = 12) -> dict:
                                           "cursor": cursor, "variants": VARIANT_LIMIT}))["products"]
         for node in page["nodes"]:
             fits = sized(node, wanted[0], wanted[1])
-            # Not made in it, but in the size either side: most of a range goes
-            # 8Y -> 10Y, and "for a 9 year old" found two pieces out of dozens.
-            # One rung on the size ladder either way, the same for 3M as for 9Y.
-            close = [] if fits else sized(node, wanted[0] - 1, wanted[1] + 1)
+            close = [] if fits else [v for lo, hi in extra for v in sized(node, lo, hi)]
             if not (fits or close):
                 continue
             chosen = fits or close
@@ -1177,7 +1177,7 @@ async def products_in_size(size: str, limit: int = 12) -> dict:
             product["variant_id"] = chosen[0].get("legacyResourceId")
             product["price_from"] = round(min(float(v["price"]) for v in chosen), 2)
             if close:
-                product["nearest_size"] = True
+                product["in_another_size_asked"] = True
                 nearest.append(product)
             else:
                 matches.append(product)
@@ -1192,6 +1192,7 @@ async def products_in_size(size: str, limit: int = 12) -> dict:
         "currency": currency,
         "count": len(matches),
         "in_exactly_this_size": exact,
+        "also_looked_in": list(also or []) or None,
         "more_available": len(matches) > limit,
         "products": matches[:limit],
     }
