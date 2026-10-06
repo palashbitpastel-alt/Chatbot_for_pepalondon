@@ -929,6 +929,9 @@ async def browse_in_size(size: str, also: list[str] | None = None) -> str:
     say plainly that nothing comes in that size and offer the nearest.
     Name the pieces with their prices - a count on its own ("8 pieces come in
     12Y") leaves the shopper reading a number with unnamed cards beside it.
+    made_for_this_age=true: the piece's size range covers this age but no size is
+    labelled it - in_this_size gives the sizes either side ("8Y, 10Y" for 9Y).
+    These are pieces for this child: show them, saying which size they come in.
     Sizes are your call: pieces_in_each_size says how many of their pieces come
     in each size this shop sells. A child's age is not always a size the range
     is made in (9Y: 2 pieces, 8Y: 24, 10Y: 27) - when it is not, call again with

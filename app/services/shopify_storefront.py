@@ -1137,6 +1137,19 @@ def _size_of(variant: dict) -> str | None:
     return None
 
 
+def _either_side_variants(node: dict, wanted: tuple[int, int]) -> list[dict]:
+    """In-stock variants of the sizes just under and just over `wanted`, when the
+    piece's whole size range covers it but no size is labelled it."""
+    from app.services.size_finder import span_of
+    sized = [(span_of(_size_of(v) or ""), v) for v in node["variants"]["nodes"]]
+    sized = [(sp, v) for sp, v in sized if sp]
+    if not sized or not (min(sp[0] for sp, _ in sized) <= wanted[0] and wanted[1] <= max(sp[1] for sp, _ in sized)):
+        return []
+    under = max((sp[1] for sp, _ in sized if sp[1] < wanted[0]), default=None)
+    over = min((sp[0] for sp, _ in sized if sp[0] > wanted[1]), default=None)
+    return [v for sp, v in sized if v.get("availableForSale") and (sp[1] == under or sp[0] == over)]
+
+
 async def products_in_size(size: str, limit: int = 12, also: list[str] | None = None) -> dict:
     """Everything buyable in one size - "12Y", "18M", "5-6Y".
 
@@ -1168,9 +1181,13 @@ async def products_in_size(size: str, limit: int = 12, also: list[str] | None = 
         for node in page["nodes"]:
             fits = sized(node, wanted[0], wanted[1])
             close = [] if fits else [v for lo, hi in extra for v in sized(node, lo, hi)]
-            if not (fits or close):
+            # Made for this age though no size is labelled it: its range runs
+            # across it (8Y and 10Y for a 9 year old). A fact about the piece,
+            # not a choice - matching the label alone found 2 pieces of dozens.
+            around = [] if (fits or close) else _either_side_variants(node, wanted)
+            if not (fits or close or around):
                 continue
-            chosen = fits or close
+            chosen = fits or close or around
             product = _public_product(node, currency)
             product["variants"] = [_public_variant(v, node) for v in chosen]
             product["in_this_size"] = sorted({_size_of(v) for v in chosen if _size_of(v)})
@@ -1178,6 +1195,9 @@ async def products_in_size(size: str, limit: int = 12, also: list[str] | None = 
             product["price_from"] = round(min(float(v["price"]) for v in chosen), 2)
             if close:
                 product["in_another_size_asked"] = True
+            if around:
+                product["made_for_this_age"] = True
+                product["not_labelled_this_size"] = True
                 nearest.append(product)
             else:
                 matches.append(product)
