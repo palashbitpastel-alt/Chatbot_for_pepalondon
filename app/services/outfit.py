@@ -818,7 +818,10 @@ COMPANIONS = {
 DEFAULT_COMPANIONS = ("Top", "Bottoms", "Shoes", "Accessory")
 # Colours that sit with anything, so a look is never blocked on an exact match.
 NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
-LOOK_PIECES = 3
+# Companions around the anchor: the main parts, then a finishing accessory - a
+# shirt look is trousers, shoes, a jacket and a belt, not three of them.
+LOOK_PIECES = 4
+_FILL_FIRST = {"Top": 0, "Bottoms": 0, "Dress": 0, "Shoes": 0, "Accessory": 1, "Outerwear": 2}
 
 
 def _colour_words(piece: dict) -> set[str]:
@@ -1110,16 +1113,35 @@ async def complete_the_look(product: str, size: str | None = None,
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
 
+    def role_of(p: dict) -> str:
+        return p.get("role") or _category(p["title"], None)
+
+    # Which accessory finishes which part (a belt with trousers, a hairband with
+    # a dress), read by the model once per accessory type in this shop.
+    await parts.learn_worn_with([p["category"] for p in pool if role_of(p) == "Accessory"])
+
+    def rank(p: dict, look: list[dict]) -> tuple:
+        """How well a piece suits the look so far - an accessory first by whether
+        it finishes a part already in it - then their colour, season, price."""
+        in_look = {anchor_role, *(role_of(x) for x in look)}
+        finishes = 0 if role_of(p) != "Accessory" or set(parts.worn_with(p["category"])) & in_look else 1
+        # An accessory picks up a colour already in the look - a brown belt
+        # with brown boots - not only the anchor's.
+        if role_of(p) == "Accessory":
+            in_it = {w for c in [*anchor["colors"], *(c for x in look for c in x["colors"])]
+                     for w in re.findall(r"[a-z]+", str(c).lower()) if len(w) > 2}
+            matched = 0 if _colour_words(p) & in_it else 1 if _shares_colour(p, []) else 2
+        else:
+            matched = 0 if _shares_colour(p, anchor["colors"]) else 1
+        return (finishes, 0 if _comes_in(p, wanted_colour) else 1, _season_first(p, season),
+                matched, p["price_from"] or 0)
+
     picked = []
     for role in order:
-        matches = [p for p in pool if (p.get("role") or _category(p["title"], None)) == role]
+        matches = [p for p in pool if role_of(p) == role]
         if not matches:
             continue
-        matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
-                                    _season_first(p, season),
-                                    0 if _shares_colour(p, anchor["colors"]) else 1,
-                                    p["price_from"] or 0))
-        picked.append(matches[0])
+        picked.append(min(matches, key=lambda p: rank(p, picked)))
         if len(picked) >= max(1, pieces):
             break
 
@@ -1147,8 +1169,19 @@ async def complete_the_look(product: str, size: str | None = None,
     # the whole thing fits, keeping the piece they asked about.
     if budget:
         allowed = float(budget)
-        while picked and (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked) > allowed:
+        spent = lambda: (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked)  # noqa: E731
+        while picked and spent() > allowed:
             picked.pop(max(range(len(picked)), key=lambda i: picked[i]["price_from"] or 0))
+        # What dropping the dearest piece left over still dresses the look: a
+        # belt in the ₹3,100 a jacket freed beats handing the money back.
+        while len(picked) < max(1, pieces):
+            taken = {anchor_role, *(role_of(p) for p in picked)}
+            fits = [p for p in pool if role_of(p) in order and role_of(p) not in taken
+                    and spent() + (p["price_from"] or 0) <= allowed]
+            if not fits:
+                break
+            # A missing main part first, then the finishing accessory, then a layer.
+            picked.append(min(fits, key=lambda p: (_FILL_FIRST.get(role_of(p), 1), *rank(p, picked))))
 
     def line(piece: dict) -> dict:
         """One line of the look: a colour and size the shop sells together.

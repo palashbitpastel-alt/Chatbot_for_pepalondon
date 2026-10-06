@@ -96,3 +96,49 @@ async def learn(types: list[str]) -> dict[str, str]:
 
 def known(product_type: str | None) -> str | None:
     return _learned.get((product_type or "").strip())
+
+
+# ── What an accessory finishes ───────────────────────────────────────────────
+# A stylist puts a belt with trousers and a hairband with a dress. Which of this
+# shop's accessory types goes with which part is read by the model, once per
+# type, rather than written down here - the same reasoning as `learn` above.
+
+_WORN_WITH_ASK = (
+    "A children's clothing shop sells these accessory types:\n"
+    "{types}\n\n"
+    "For each one, say which parts of an outfit a stylist would finish with it. "
+    "Use any of: Top, Bottoms, Dress, Shoes, Outerwear. A belt finishes Bottoms; "
+    "a hairband finishes a Dress or a Top; socks finish Shoes; a hat or scarf "
+    "finishes Outerwear. A bib or anything not part of a styled look gets [].\n"
+    "Answer with JSON only: {{\"<accessory type>\": [\"<part>\", ...], ...}}"
+)
+
+_worn_with: dict[str, list[str]] = {}
+_OUTFIT_PARTS = ("Top", "Bottoms", "Dress", "Shoes", "Outerwear")
+
+
+async def learn_worn_with(types: list[str]) -> dict[str, list[str]]:
+    """Ask the model which parts each accessory type finishes. Cached across calls."""
+    unknown = sorted({t.strip() for t in types if t and t.strip() not in _worn_with})
+    if not unknown:
+        return _worn_with
+    try:
+        from app.agent.base import build_llm
+
+        # callbacks=[]: runs inside a shopper's turn (see `learn`).
+        answer = await build_llm(temperature=0, max_tokens=500).ainvoke(
+            _WORN_WITH_ASK.format(types="\n".join(f"- {t}" for t in unknown)),
+            config={"callbacks": [], "tags": ["parts"], "run_name": "learn_worn_with"})
+        text = answer.content if hasattr(answer, "content") else str(answer)
+        if block := re.search(r"\{.*\}", text, re.S):
+            for kind, with_ in json.loads(block.group(0)).items():
+                if isinstance(with_, list):
+                    _worn_with[str(kind).strip()] = [p.strip().title() for p in with_
+                                                     if isinstance(p, str) and p.strip().title() in _OUTFIT_PARTS]
+    except Exception:  # noqa: BLE001 - never fail a shopper's turn over this
+        logger.warning("Could not work out what %s are worn with", unknown, exc_info=True)
+    return _worn_with
+
+
+def worn_with(product_type: str | None) -> list[str]:
+    return _worn_with.get((product_type or "").strip(), [])

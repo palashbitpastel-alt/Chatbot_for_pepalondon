@@ -424,7 +424,9 @@ async def support_more(req: ShelfRequest) -> dict:
     """
     if req.tool not in tools.SHELF_TOOLS:
         raise HTTPException(status_code=400, detail="Not a shelf")
-    audience = identity.set_audience(req.for_)
+    # Not named `audience`: that is the module, and shadowing it made every
+    # "Show more" a 500 at audience.ensure().
+    whose = identity.set_audience(req.for_)
     colour = identity.set_colour(req.colour)
     country = market.set_country(req.country)
     showing = market.set_showing(req.currency)
@@ -435,7 +437,7 @@ async def support_more(req: ShelfRequest) -> dict:
         logger.warning("Could not fetch more of shelf %s %s", req.tool, req.arg, exc_info=True)
         raise HTTPException(status_code=502, detail="Could not load more products") from None
     finally:
-        identity.reset_audience(audience)
+        identity.reset_audience(whose)
         identity.reset_colour(colour)
         market.reset_country(country)
         market.reset_showing(showing)
