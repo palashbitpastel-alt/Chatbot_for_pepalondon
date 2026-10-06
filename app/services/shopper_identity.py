@@ -163,6 +163,23 @@ def on_screen() -> tuple:
     return _screen.get()
 
 
+# The look open in the chat, as the shopper left it ("Brown Striped Belt - Brown / S"),
+# so a stylist refining it keeps what still suits instead of starting over.
+_look: ContextVar[tuple] = ContextVar("look_on_screen", default=())
+
+
+def set_look(rows) -> object:
+    return _look.set(tuple(str(r) for r in (rows or []) if r))
+
+
+def reset_look(token) -> None:
+    _look.reset(token)
+
+
+def look_on_screen() -> tuple:
+    return _look.get()
+
+
 # The checklist waiting for their OK, as the variants they left ticked. Adding
 # exactly those is them confirming it, not a guess to be checked again.
 _checklist: ContextVar[frozenset[str]] = ContextVar("checklist", default=frozenset())

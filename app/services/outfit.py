@@ -1036,6 +1036,9 @@ shoes included, and then finished. You decide, as a professional stylist would:
 - with a budget: the whole look INCLUDING the anchor must stay within it. Choose what to keep
   and what to leave out as a stylist would, and spend the budget well rather than leaving
   much of it unused. List in left_out the best piece the budget kept out, if any.
+look_on_screen, when given, is the look they already have open: they are refining it. Keep each
+of its pieces that still suits with what they have just said, and change only what that calls
+for.
 Use only handles and colours exactly as given. Return ONLY JSON:
 {"pieces": [{"handle": "...", "colour": "..."}], "why": "one short line on why it works",
  "left_out": [{"handle": "...", "why": "what it would add"}]}"""
@@ -1071,6 +1074,7 @@ async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budge
                    "colours": anchor["colors"], "price": anchor["price_from"]},
         "child": {"for": audience, "age": age, "size": size},
         "what_the_shopper_said": list(identity.said_messages())[-8:],
+        "look_on_screen": list(identity.look_on_screen()),
         "wants_colour": wanted_colour, "avoids_colours": list(identity.avoids_colour()),
         "season": season, "budget": budget, "currency": currency,
         "candidates": candidates,

@@ -862,6 +862,10 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             [i.variant_id for i in req.context.on_screen or [] if i.ticked]
             if req.context and req.context.on_screen_kind == "checklist" else None)
         saved_token = identity.set_saved(req.saved)
+        look_token = identity.set_look(
+            [f"{i.title} - {i.option}" if i.option else i.title
+             for i in req.context.on_screen or [] if i.title and i.ticked]
+            if req.context and req.context.on_screen_kind == "look" else None)
         # What the shopper has actually written, so that nothing can be put in
         # their bag unless the agent quotes the words that asked for it. Their
         # last few turns, not just this one: "add it" and the size that answers
@@ -950,6 +954,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             identity.reset_screen(screen_token)
             identity.reset_checklist(checklist_token)
             identity.reset_saved(saved_token)
+            identity.reset_look(look_token)
             identity.reset_said(said_token)
             market.reset_country(country_token)
             market.reset_showing(showing_token)
