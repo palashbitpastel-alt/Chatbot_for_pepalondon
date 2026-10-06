@@ -629,8 +629,12 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     size, the pieces sold in the child's own size (their_size) come back too, and
     every piece says in_their_size true/false: offer the ones they can wear now and
     choose among them what answers the request - a kind they named, or the whole
-    range when they asked generally. A piece with in_their_size=false is one to grow into - never the answer
-    on its own. largest_we_make marks pieces in our biggest size when the child is
+    range when they asked generally. With a kind, every piece of it comes back,
+    best fit first: show them all ([show: all]) - name up to six with prices and
+    say how many there are in all. in_their_size=false: not made in their exact
+    size - its sizes list says which are nearest (a 7 year old: 6Y or 8Y). Offer
+    it honestly with that size ("comes in 8Y, room to grow"); never say a piece
+    comes in their size unless in_their_size is true. largest_we_make marks pieces in our biggest size when the child is
     older than our range: build the nearest look from those and say it is the
     largest we make. sleepwear=true is nightwear - never offer it as a dress or
     for an occasion unless they ask for nightwear. worn_for says what the store's own words place a piece at.
@@ -650,7 +654,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     """
     try:
         result = await outfit.suggest_pieces(for_who, colour, occasion, age or None, budget or None,
-                                             category=category, limit=6 if category else 4,
+                                             category=category, limit=0 if category else 4,
                                              min_price=min_price or None, avoid_colour=avoid_colour,
                                              exclude=exclude)
         # Their size from the chat when the agent did not pass one on.

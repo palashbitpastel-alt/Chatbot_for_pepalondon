@@ -727,8 +727,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     ))
 
     if wanted_category:
-        # They named a kind, so show them that kind and nothing else.
-        picked = pool[:max(1, limit)]
+        # A kind was asked for: every piece of it that suits, best first - the
+        # agent chooses what to show, not a cut-off of four.
+        picked = pool[:limit] if limit else pool
     else:
         # What part each of THIS shop's product types plays, worked out once and
         # remembered - not a table of garment names written in here.
@@ -768,12 +769,6 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         "colour_matched": colour_matched,
         "still_to_ask": still_to_ask,
         "budget_optional": not budget,
-        "next": ("Nothing is missing: call build_outfit now with one piece per part of the look "
-                 "(top or dress, bottoms if needed, shoes, an accessory) from these handles, and "
-                 "show the finished look. Do not ask whether to put it together. A part missing "
-                 "here (e.g. no top in their colour): take it from browse_catalogue - a whole "
-                 "outfit, never a smaller one.")
-                if not still_to_ask and not wanted_category else None,
         # A shoe is sized by number, not age: the size chart's typical EU size for
         # a child this old, so a shoe in the look is not a guess.
         "typical_shoe_eu_for_age": _typical_shoe_eu(age),
