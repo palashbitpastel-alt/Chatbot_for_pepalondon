@@ -970,9 +970,18 @@ async def shelf(tool: str, arg: str) -> dict:
     return found
 
 
+# Said on the shelf itself, where the agent reads it: asked for "all for girls"
+# it named six and drew only those six of 46.
+_SHELF_CARDS = ("The storefront draws this WHOLE shelf - every piece, with Show more - when you end "
+                "with [show: all]. Do that whenever they asked to see these; list ids in [show: ...] "
+                "only when they asked for some of them.")
+
+
 def _for_the_model(found: dict) -> dict:
     """The shelf as the agent reads it: the first few, and how many there are."""
     products = found.get("products") if isinstance(found, dict) else None
+    if isinstance(found, dict) and isinstance(products, list) and products:
+        found["cards"] = _SHELF_CARDS
     if not isinstance(products, list) or len(products) <= SHELF_FOR_MODEL:
         if isinstance(found, dict) and isinstance(products, list):
             found["more_available"] = False
