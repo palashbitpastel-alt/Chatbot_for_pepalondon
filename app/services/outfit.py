@@ -552,23 +552,47 @@ def _outgrown(piece: dict, age: float | None) -> bool:
     return False
 
 
+def _age_rung(age: float | None) -> int | None:
+    """A child's age on the shop's size ladder (the rung its own label would sit on)."""
+    from app.services.size_finder import span_of
+    if age is None:
+        return None
+    span = span_of(f"{int(age)}Y") if age >= 1 else span_of(f"{max(0, round(age * 12))}M")
+    return span[0] if span else None
+
+
+def _either_side(sizes: list[str], age: float | None) -> list[str]:
+    """The piece's own sizes nearest this child: the one at or just under their
+    age and the one at or just over it ("8Y", "10Y" for a 9 year old). Facts
+    about the piece, for the agent to offer; one size if it is made in theirs."""
+    from app.services.size_finder import span_of
+    rung = _age_rung(age)
+    laddered = [(span_of(s), s) for s in sizes or []]
+    laddered = [(sp, s) for sp, s in laddered if sp]
+    if rung is None or not laddered:
+        return []
+    exact = [s for sp, s in laddered if sp[0] <= rung <= sp[1]]
+    if exact:
+        return exact[:1]
+    under = max(((sp, s) for sp, s in laddered if sp[1] < rung), default=None)
+    over = min(((sp, s) for sp, s in laddered if sp[0] > rung), default=None)
+    return [pick[1] for pick in (under, over) if pick is not None]
+
+
 def _fits_age(sizes: list[str], age: int | None) -> bool:
-    """Whether a piece comes in a size for this age. Pieces with no size run fit."""
+    """Whether a piece is made for a child this old: its size range - smallest
+    size to largest - covers their age. A dress in 8Y and 10Y suits a 9 year old;
+    matching "9Y" as text threw it out. Shoe sizes and one-size say no age."""
+    from app.services.size_finder import span_of
     if age is None or not sizes:
         return True
-    for raw in sizes:
-        size = raw.strip().upper()
-        if size == "ONE SIZE" or "UK" in size or "EU" in size:
-            return True                 # shoe sizes do not map to an age
-        if size == f"{age}Y":
-            return True
-        if age <= 1 and size.endswith("M"):
-            return True
-        if size.endswith("Y") and "-" in size:
-            low, _, high = size[:-1].partition("-")
-            if low.isdigit() and high.isdigit() and int(low) <= age <= int(high):
-                return True
-    return False
+    spans = [span_of(s) for s in sizes]
+    if any(sp is None for sp in spans):
+        return True                     # shoe sizes / one size: not an age
+    rung = _age_rung(age)
+    if rung is None:
+        return True
+    return min(sp[0] for sp in spans) <= rung <= max(sp[1] for sp in spans)
 
 
 def _their_colour_of(product: dict | None) -> str | None:
@@ -756,6 +780,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "colour": _colour_match(p["colors"], wanted) if wanted else None,
                 "only_in_colour_they_dislike": only_in_avoided(p) or None,
                 "too_small_for_them": _outgrown(p, age) or None,
+                # Made for their age (its range covers it), and which of its own
+                # sizes sit either side - "8Y, 10Y" for a 9 year old.
+                "for_their_age": True if age is not None else None,
+                "sizes_either_side_of_their_age": _either_side(p["sizes"], age) or None,
                 "colors": p["colors"],
                 "sizes": p["sizes"],
                 "image": p["image"],
