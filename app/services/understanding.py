@@ -89,8 +89,10 @@ async def understood(messages: list[str], base: dict | None = None, currency: st
         return needs.understood(messages, base=base, currency=currency)
     sym = needs.symbol(currency) or ""
     kept = {k: v for k, v in (base or {}).items() if k in needs.REMEMBERED and v}
-    remembered = ("\nRemembered from an earlier visit (keep unless the messages change it): "
-                  + json.dumps(kept)) if kept else ""
+    remembered = ("\nRemembered from an earlier visit, possibly about ANOTHER child: "
+                  + json.dumps(kept) + ". Keep these only when the messages are clearly about the same "
+                  "child. A daughter after a son (or a son after a daughter) is another child even at the "
+                  "same age - then drop every remembered detail, colour included.") if kept else ""
     try:
         from app.agent.base import build_llm
         llm = build_llm(temperature=0, max_tokens=200)
