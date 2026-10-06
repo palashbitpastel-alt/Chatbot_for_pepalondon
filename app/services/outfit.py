@@ -11,6 +11,7 @@ Reads are live from the Shopify Admin API and restricted to ACTIVE products, so
 a look can never contain something a shopper cannot buy.
 """
 
+import asyncio
 import copy
 import json
 import logging
@@ -818,10 +819,7 @@ COMPANIONS = {
 DEFAULT_COMPANIONS = ("Top", "Bottoms", "Shoes", "Accessory")
 # Colours that sit with anything, so a look is never blocked on an exact match.
 NEUTRALS = {"white", "ivory", "cream", "navy", "grey", "gray", "beige", "black", "camel", "stone"}
-# Companions around the anchor: the main parts, then a finishing accessory - a
-# shirt look is trousers, shoes, a jacket and a belt, not three of them.
-LOOK_PIECES = 4
-_FILL_FIRST = {"Top": 0, "Bottoms": 0, "Dress": 0, "Shoes": 0, "Accessory": 1, "Outerwear": 2}
+LOOK_PIECES = 3
 
 
 def _colour_words(piece: dict) -> set[str]:
@@ -1027,6 +1025,92 @@ def _same_size(piece: dict, size: str | None) -> bool:
     return False
 
 
+_STYLIST = """You are the senior stylist of a children's clothing shop. Put together ONE complete look
+around the anchor piece, choosing ONLY from the candidates given (every one is in stock, in
+this child's size and for this child). In this shop a complete look is one the child can wear out of the door: dressed top to toe,
+shoes included, and then finished. You decide, as a professional stylist would:
+- which parts this look needs, for this child, occasion and season, and which pieces suit the
+  anchor and each other - cut, formality, colour, texture;
+- the finishing touches that make it a look rather than a list of clothes;
+- for each piece, which of its listed colours to use;
+- with a budget: the whole look INCLUDING the anchor must stay within it. Choose what to keep
+  and what to leave out as a stylist would, and spend the budget well rather than leaving
+  much of it unused. List in left_out the best piece the budget kept out, if any.
+Use only handles and colours exactly as given. Return ONLY JSON:
+{"pieces": [{"handle": "...", "colour": "..."}], "why": "one short line on why it works",
+ "left_out": [{"handle": "...", "why": "what it would add"}]}"""
+
+STYLIST_TIMEOUT = 30
+
+
+async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budget, currency,
+                   wanted_colour, season) -> dict | None:
+    """The look around `anchor`, chosen by the model from pieces that fit.
+
+    Code only says what CAN go in - in stock, the child's size, for this child.
+    What SHOULD go in is the model's call. None when it cannot be reached or
+    gives nothing usable, so the caller falls back to its own picking.
+    """
+    if not pool:
+        return None
+    from app.agent.base import build_llm
+    from app.services import shopper_identity as identity
+
+    by_handle = {p["handle"]: p for p in pool}
+
+    def colours_in_size(p: dict) -> list[str]:
+        real = [c for c in p.get("combinations") or [] if c["available"] and c["color"]]
+        fits = [c["color"] for c in real if not c["size"] or _same_size({"sizes": [c["size"]]}, size)]
+        return sorted(set(fits or [c["color"] for c in real])) or p["colors"]
+
+    candidates = [{"handle": p["handle"], "title": p["title"],
+                   "part": p.get("role") or _category(p["title"], None), "kind": p["category"],
+                   "colours": colours_in_size(p), "price": p["price_from"]} for p in pool]
+    brief = {
+        "anchor": {"title": anchor["title"], "part": anchor.get("role") or _category(anchor["title"], None),
+                   "colours": anchor["colors"], "price": anchor["price_from"]},
+        "child": {"for": audience, "age": age, "size": size},
+        "what_the_shopper_said": list(identity.said_messages())[-8:],
+        "wants_colour": wanted_colour, "avoids_colours": list(identity.avoids_colour()),
+        "season": season, "budget": budget, "currency": currency,
+        "candidates": candidates,
+    }
+    ask = [("system", _STYLIST), ("human", json.dumps(brief, ensure_ascii=False))]
+    for _ in range(2):
+        try:
+            # callbacks=[]: inside a shopper's turn, the JSON must not stream to them.
+            answer = await asyncio.wait_for(build_llm(temperature=0.3, max_tokens=700).ainvoke(
+                ask, config={"callbacks": [], "tags": ["stylist"], "run_name": "stylist"}),
+                timeout=STYLIST_TIMEOUT)
+            text = answer.content if isinstance(answer.content, str) else str(answer.content)
+            found = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+        except Exception:  # noqa: BLE001 - the caller still builds a look
+            logger.warning("The stylist could not put a look together", exc_info=True)
+            return None
+        pieces, colours = [], {}
+        for item in found.get("pieces") or []:
+            piece = by_handle.get(str((item or {}).get("handle")))
+            if piece and piece not in pieces:
+                pieces.append(piece)
+                if item.get("colour"):
+                    colours[piece["handle"]] = str(item["colour"])
+        if not pieces:
+            return None
+        total = (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in pieces)
+        if budget and total > float(budget):
+            # A sum is not a judgement: say it, and let the stylist choose again.
+            ask += [("ai", text), ("human", f"Those come to {total:.0f} {currency} with the anchor, over the "
+                                            f"{budget:.0f} budget. Choose again within it.")]
+            continue
+        left_out = [{"title": by_handle[h]["title"], "price": by_handle[h]["price_from"],
+                     "why": str(x.get("why") or "")[:200]}
+                    for x in found.get("left_out") or []
+                    if (h := str((x or {}).get("handle"))) in by_handle and by_handle[h] not in pieces]
+        return {"pieces": pieces[:MAX_OUTFIT_ITEMS - 1], "colours": colours,
+                "why": str(found.get("why") or "")[:300], "left_out": left_out[:2]}
+    return None
+
+
 async def complete_the_look(product: str, size: str | None = None,
                             budget: float | None = None, pieces: int = LOOK_PIECES) -> dict:
     """The coordinated outfit around the piece a shopper is looking at.
@@ -1104,8 +1188,9 @@ async def complete_the_look(product: str, size: str | None = None,
                 age = max(0, round(oldest * (middle - run[0]) / (run[1] - run[0])))
                 size = None      # a shoe number is not a size for the clothes
 
-    pool = [p for p in stock if p["handle"] != anchor["handle"]
-            and (p.get("role") or _category(p["title"], None)) != anchor_role]
+    # Every other piece is a candidate - a cardigan over a shirt is the
+    # stylist's call. The fallback picking below never takes the anchor's role.
+    pool = [p for p in stock if p["handle"] != anchor["handle"]]
     pool = _for_this_child(pool, audience)
     span = _shoe_span(stock)
     season = identity.shopping_season()
@@ -1116,44 +1201,29 @@ async def complete_the_look(product: str, size: str | None = None,
     if budget:
         pool = [p for p in pool if (p["price_from"] or 0) <= budget]
 
-    def role_of(p: dict) -> str:
-        return p.get("role") or _category(p["title"], None)
-
-    # Which accessory finishes which part (a belt with trousers, a hairband with
-    # a dress), read by the model once per accessory type in this shop.
-    await parts.learn_worn_with([p["category"] for p in pool if role_of(p) == "Accessory"])
-
-    def rank(p: dict, look: list[dict]) -> tuple:
-        """How well a piece suits the look so far - an accessory first by whether
-        it finishes a part already in it - then their colour, season, price."""
-        # An accessory ranks by the most central part it finishes: a belt
-        # finishing the trousers before socks finishing the shoes.
-        in_look = [anchor_role, *(r for r in order if r in {role_of(x) for x in look})]
-        finished = [i for i, r in enumerate(in_look) if r in parts.worn_with(p["category"])]
-        finishes = 0 if role_of(p) != "Accessory" else min(finished, default=len(in_look))
-        # An accessory picks up a colour already in the look - a brown belt
-        # with brown boots - not only the anchor's.
-        if role_of(p) == "Accessory":
-            in_it = {w for c in [*anchor["colors"], *(c for x in look for c in x["colors"])]
-                     for w in re.findall(r"[a-z]+", str(c).lower()) if len(w) > 2}
-            matched = 0 if _colour_words(p) & in_it else 1 if _shares_colour(p, []) else 2
-        else:
-            matched = 0 if _shares_colour(p, anchor["colors"]) else 1
-        return (finishes, 0 if _comes_in(p, wanted_colour) else 1, _season_first(p, season),
-                matched, p["price_from"] or 0)
-
-    picked = []
-    for role in order:
-        matches = [p for p in pool if role_of(p) == role]
+    # The look itself is a stylist's judgement, so the model makes it from the
+    # pieces that really fit this child; the loops below only run when it
+    # cannot be reached.
+    styled = await _stylist(anchor, pool, age=age, size=size, audience=audience, budget=budget,
+                            currency=catalogue.get("currency"), wanted_colour=wanted_colour,
+                            season=season)
+    picked = list(styled["pieces"]) if styled else []
+    chosen_colour = styled["colours"] if styled else {}
+    for role in (() if styled else order):
+        matches = [p for p in pool if (p.get("role") or _category(p["title"], None)) == role]
         if not matches:
             continue
-        picked.append(min(matches, key=lambda p: rank(p, picked)))
+        matches.sort(key=lambda p: (0 if _comes_in(p, wanted_colour) else 1,
+                                    _season_first(p, season),
+                                    0 if _shares_colour(p, anchor["colors"]) else 1,
+                                    p["price_from"] or 0))
+        picked.append(matches[0])
         if len(picked) >= max(1, pieces):
             break
 
     # The named companions for this kind of piece may not all be in stock in
     # their size; rather than a look of one, fill up from whatever else suits.
-    if len(picked) < max(1, pieces):
+    if not styled and len(picked) < max(1, pieces):
         taken = {p.get("role") or _category(p["title"], None) for p in picked}
         rest = [p for p in pool
                 if (p.get("role") or _category(p["title"], None)) in order
@@ -1173,25 +1243,10 @@ async def complete_the_look(product: str, size: str | None = None,
     # A budget is what the shopper will spend on the look, not on each piece:
     # four things under 400 each came to 730. Drop the dearest companions until
     # the whole thing fits, keeping the piece they asked about.
-    if budget:
+    if budget and not styled:
         allowed = float(budget)
-        spent = lambda: (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked)  # noqa: E731
-        # The layer goes first, then the accessory, and only then a main piece -
-        # dearest first within each: dropping the boots for the belt left a look
-        # with no shoes.
-        while picked and spent() > allowed:
-            picked.pop(max(range(len(picked)), key=lambda i: (_FILL_FIRST.get(role_of(picked[i]), 1),
-                                                              picked[i]["price_from"] or 0)))
-        # What dropping the dearest piece left over still dresses the look: a
-        # belt in the ₹3,100 a jacket freed beats handing the money back.
-        while len(picked) < max(1, pieces):
-            taken = {anchor_role, *(role_of(p) for p in picked)}
-            fits = [p for p in pool if role_of(p) in order and role_of(p) not in taken
-                    and spent() + (p["price_from"] or 0) <= allowed]
-            if not fits:
-                break
-            # A missing main part first, then the finishing accessory, then a layer.
-            picked.append(min(fits, key=lambda p: (_FILL_FIRST.get(role_of(p), 1), *rank(p, picked))))
+        while picked and (anchor["price_from"] or 0) + sum(p["price_from"] or 0 for p in picked) > allowed:
+            picked.pop(max(range(len(picked)), key=lambda i: picked[i]["price_from"] or 0))
 
     def line(piece: dict) -> dict:
         """One line of the look: a colour and size the shop sells together.
@@ -1220,8 +1275,11 @@ async def complete_the_look(product: str, size: str | None = None,
             wanted_size = _size_for_age(fits or sizes, age, oldest, span)
             choices = [c for c in real if c["size"] == wanted_size] or real
 
-        # Their colour, then one that sits with the anchor, then whatever is there.
-        theirs = [c for c in choices if _comes_in({"colors": [c["color"] or ""]}, wanted_colour)]
+        # The stylist's colour where it comes in this size; otherwise their
+        # colour, then one that sits with the anchor, then whatever is there.
+        theirs = [c for c in choices if (c["color"] or "") == chosen_colour.get(piece["handle"])]
+        if not theirs:
+            theirs = [c for c in choices if _comes_in({"colors": [c["color"] or ""]}, wanted_colour)]
         if not theirs:
             shared = {x.strip().lower() for x in anchor["colors"]} | NEUTRALS
             theirs = [c for c in choices if (c["color"] or "").strip().lower() in shared]
@@ -1254,6 +1312,10 @@ async def complete_the_look(product: str, size: str | None = None,
     look["anchor"] = {"handle": anchor["handle"], "title": anchor["title"], "category": anchor["category"]}
     look["size"] = size
     look["heading"] = f"The coordinated look around the {anchor['title']}"
+    if styled:
+        look["stylist_note"] = styled["why"]
+        if styled["left_out"]:
+            look["left_out_for_budget"] = styled["left_out"]
     return look
 
 

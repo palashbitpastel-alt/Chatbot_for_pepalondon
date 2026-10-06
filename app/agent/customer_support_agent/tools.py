@@ -720,7 +720,9 @@ async def complete_the_look(product: str, size: str = "", budget: float = 0) -> 
     look and would throw theirs away. Change just that piece instead.
     Returns the look already priced, with its total and the exact variants; the
     storefront draws it with a tick per piece and an add-the-look button. Say in
-    one line what you have put together and the total, nothing more.
+    one line what you have put together and the total - stylist_note is why the
+    pieces work together, in the stylist's words. left_out_for_budget: what the
+    budget kept out; offer the best of it in one line with its price.
     """
     try:
         return json.dumps(await outfit.complete_the_look(product, size or None, budget or None),
