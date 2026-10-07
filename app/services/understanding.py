@@ -43,10 +43,14 @@ Return ONLY a JSON object with these keys, each a short string or null when not 
   otherwise {sym}.
 - "size": a clothing size only if they named one, e.g. "5Y", "18M", "5-6Y".
 - "category": the kind of piece they want, singular, e.g. "Dress", "Shirt", "Shoes" - kept
-  until they ask for a different kind.
+  until they ask for a different kind. A complete outfit or look ("the best outfit", "a whole
+  look", "dress her head to toe") is not one kind: "category" is then null.
 - "count": how many items their LATEST message asks to see, as a number ("show me 2 jackets"
   -> 2), else null. Never an age, a size, a price or a number of children.
-The latest message wins when they change something.
+The latest message wins when they change something. A new request after an earlier one (an
+outfit after "show me a navy jumper") starts fresh for "colour" and "category": a colour they
+gave for an earlier piece is not the colour of the whole outfit, so it is null unless they say
+it again for the new request. Who it is for, age, size, occasion, budget and avoid_colour stay.
 A DIFFERENT CHILD: when the newest messages are about another child than before (another age,
 or a size that could not fit the earlier child - a baby size after a 14 year old), describe ONLY
 the newest child. Everything said about the earlier child is dropped - its age, size, occasion,

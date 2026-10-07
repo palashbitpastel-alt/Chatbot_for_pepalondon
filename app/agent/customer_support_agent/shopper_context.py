@@ -135,7 +135,9 @@ def describe(
             context.on_screen_kind or "", "pieces")
         lines.append(f"An outfit from earlier in this chat ({kind}), exactly as it stands. It is "
                      "background: use it only when they talk about the look itself (keep it, add them, swap "
-                     "a piece in it). A question about one piece - its colour, its size - is about that "
+                     "a piece in it) - and a new wish about the child or the outfit (a colour she does not "
+                     "like, a budget, an occasion) is about the look too: rebuild it as a whole look with "
+                     "that wish, never answer with loose pieces. A question about one piece - its colour, its size - is about that "
                      "piece alone: answer it on its own card and never fold it into this look unless they "
                      "ask. When they do mean the look: the pieces and options are kept unless they change "
                      "them. Ticks are their choice - adding "
