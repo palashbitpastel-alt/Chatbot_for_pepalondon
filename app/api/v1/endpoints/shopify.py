@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.core.config import settings
-from app.services import insights
+from app.services import insights, shopify_search
 from app.services.shopify_store import fetch_store_snapshot, is_configured
 
 router = APIRouter(tags=["shopify"])
@@ -18,4 +18,6 @@ async def shopify_status() -> dict:
         "store_url": settings.SHOPIFY_STORE_URL or None,
         "api_version": settings.SHOPIFY_API_VERSION,
         **insights.store_meta(snapshot),
+        # Whether product search runs on Shopify's own storefront search.
+        "storefront_search": await shopify_search.product_ids("a", 1) is not None,
     }
