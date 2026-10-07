@@ -911,8 +911,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 shelves = ", ".join(f"{c.get('name')} ({c.get('product_count')})" for c in listed)
                 ours = (f"[Our categories, with how many pieces in each: {shelves}. A shelf name "
                         "is only where a piece is filed: when they ask for a kind of thing in their "
-                        "own words rather than one of these by name, read_every_piece and judge "
-                        "from each piece's own details which ones answer them.]")
+                        "own words rather than one of these by name, or describe a need rather than "
+                        "a kind of piece, read_every_piece and judge from each piece's own details "
+                        "which ones answer them - every one that does, whatever shelf it is on.]")
                 turn_briefing = f"{turn_briefing}\n{ours}" if turn_briefing else ours
             except (ShopifyError, KeyError, ValueError):
                 logger.warning("Could not list categories for the briefing", exc_info=True)
