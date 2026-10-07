@@ -135,8 +135,9 @@ def describe(
             lines.append(f"Looking at: the {where} page")
         if shelf := _collection_on_screen(context):
             lines.append(f'The collection on their screen is "{shelf}" - browse_category with that handle '
-                         "opens exactly what they are looking at. Whether their message is about it is "
-                         "your call.")
+                         "opens exactly what they are looking at. A message that points at the page they "
+                         "are on, rather than naming something, is about this collection: open it. "
+                         "Otherwise whether their message is about it is your call.")
         shown_in = context.currency or (customer.currency if customer else None)
         if shown_in:
             place = f" in {context.country}" if context.country else ""

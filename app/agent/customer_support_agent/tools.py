@@ -1059,6 +1059,10 @@ _SHELF_CARDS = ("The storefront draws this WHOLE shelf - every piece, with Show 
 def _for_the_model(found: dict) -> dict:
     """The shelf as the agent reads it: the first few, and how many there are."""
     products = found.get("products") if isinstance(found, dict) else None
+    # One number for the shelf. The category's own product_count leaves out the
+    # pieces named like it from elsewhere, and was said beside a grid of more.
+    if isinstance(found, dict) and isinstance(found.get("category"), dict):
+        found["category"] = {k: v for k, v in found["category"].items() if k != "product_count"}
     if isinstance(found, dict) and isinstance(products, list) and products:
         found["cards"] = _SHELF_CARDS
     if not isinstance(products, list) or len(products) <= SHELF_FOR_MODEL:
@@ -1077,7 +1081,10 @@ def _for_the_model(found: dict) -> dict:
                                          "variants": [{"variant_id": v.get("variant_id"), "price": v.get("price")}
                                                       for v in p.get("variants") or []]}
                                         for p in cheapest],
-            "note": "products is only the first page - never say it is everything, or the cheapest"}
+            "note": (f"products is only the first {SHELF_FOR_MODEL} of whole_shelf_count - never say it is "
+                     "everything, or the cheapest. Your [show: ...] can only draw pieces you were given, so "
+                     "when the whole shelf answers them end with [show: all], and the number you give is "
+                     "whole_shelf_count.")}
 
 
 
