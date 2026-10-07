@@ -23,8 +23,9 @@ from app.agent.customer_support_agent.tools import CUSTOMER_SUPPORT_TOOLS
 OUTFIT_MAX_ITERATIONS = 10
 
 # This agent faces the open storefront, so a runaway answer is a runaway bill.
-# A full outfit with its bullets fits comfortably in a few hundred tokens.
-MAX_REPLY_TOKENS = 500
+# A full outfit with its bullets fits comfortably in a few hundred tokens; the
+# rest is room for the [show: ...] line when every winter piece gets a card.
+MAX_REPLY_TOKENS = 900
 
 
 @lru_cache(maxsize=1)
