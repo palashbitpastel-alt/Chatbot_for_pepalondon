@@ -598,9 +598,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     """Every in-stock piece that fits what you know so far, best fit first. Use
     on EVERY turn of an outfit, occasion or gift request - before you ask
     anything. You choose what to show from it: each piece says its part of an
-    outfit (part), what the store's pieces were read as worn for (worn_for) and
-    when (seasons) - judge the fit yourself; nothing has been filtered out on
-    those.
+    outfit (part), what the store's pieces were read as worn for (worn_for),
+    when (seasons) and what it is (about: fabric, warmth, sleeves, read off the
+    shop's whole description) - judge the fit yourself; nothing has been
+    filtered out on those.
 
     Fill in only what the shopper has told you in this conversation and leave the
     rest empty (age 0, budget 0). budget is the most a piece may cost, min_price
