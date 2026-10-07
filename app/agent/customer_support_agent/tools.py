@@ -635,7 +635,8 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     choose among them what answers the request - a kind they named, or the whole
     range when they asked generally. With a kind, every piece of it comes back,
     best fit first: show them all ([show: all]) - name up to six with prices and
-    say how many there are in all. in_their_size=false: not made in their exact
+    say how many there are in all. Given a size, count is how many are sold in
+    their size: that is the total to give, and a total always goes with [show: all]. in_their_size=false: not made in their exact
     size - its sizes list says which are nearest (a 7 year old: 6Y or 8Y). Offer
     it honestly with that size ("comes in 8Y, room to grow"); never say a piece
     comes in their size unless in_their_size is true. largest_we_make marks pieces in our biggest size when the child is
@@ -736,6 +737,11 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
                                   if str(p["product_id"]) not in shown] \
         + [entry(p, {"in_their_size": True, "other_kind": True}) for p in others[:SHELF_FOR_MODEL]
            if str(p["product_id"]) not in shown]
+    if not nearest:
+        # "How many there are in all" is what they can wear - the pieces sold in
+        # their size. The suggestions outside it are ideas, not part of that
+        # total: counting them told a 5 year old's family "26" over 19 cards.
+        result["count"] = sum(1 for p in result["products"] if p.get("in_their_size"))
 
 
 @tool
