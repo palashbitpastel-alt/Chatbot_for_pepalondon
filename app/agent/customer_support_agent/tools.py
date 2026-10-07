@@ -999,6 +999,19 @@ async def shelf(tool: str, arg: str, also: list[str] | None = None) -> dict:
             arg, limit=shopify_storefront.SIZE_SCAN_PAGES * shopify_storefront.SIZE_SCAN_PAGE, also=also)
     elif tool == "browse_category":
         found = await shopify_storefront.category_products(arg, limit=shopify_storefront.SHELF_LIMIT)
+        # Other categories the agent judged part of the same request: one shelf.
+        for extra in also or []:
+            more = await shopify_storefront.category_products(extra, limit=shopify_storefront.SHELF_LIMIT)
+            if more.get("found") is False:
+                continue
+            if found.get("found") is False:
+                found = more
+                continue
+            known = {p["product_id"] for p in found.get("products") or []}
+            found["products"] = (found.get("products") or []) + [
+                p for p in more.get("products") or [] if p["product_id"] not in known]
+            found["also_categories"] = found.get("also_categories", []) + [(more.get("category") or {}).get("name")]
+            found["more_available"] = found.get("more_available") or more.get("more_available")
     else:
         raise ValueError(f"not a shelf: {tool}")
     found = _in_their_colour(_for_this_shopper(found))
@@ -1117,8 +1130,8 @@ def _in_their_colour(found: dict) -> dict:
     return found
 
 @tool
-async def browse_category(category: str) -> str:
-    """Every product in ONE category the shopper named or tapped.
+async def browse_category(category: str, also: list[str] | None = None) -> str:
+    """Every product in the category the shopper named or tapped.
 
     category: what they actually gave you - a name like "Dress" or "Grace
       Collection", or the id a category tile sent back. Plurals are fine
@@ -1148,9 +1161,22 @@ async def browse_category(category: str) -> str:
     the shopper's word in their own name - "Pyjama Trousers" for "pyjamas". They
     are already in products; say plainly that they sit under another heading
     rather than passing them off as part of the category.
+
+    also: more of our categories, by name, to draw on the same shelf as this
+      one. all_categories lists every category we have with its count: read it
+      and judge whether what the shopper asked for covers more than the one you
+      opened. If it does, call again with the same category and every other one
+      that answers them in also, so the answer is the whole of what they asked
+      for, not one part of it. also_categories says which were joined.
     """
     try:
-        return json.dumps(_for_the_model(await shelf("browse_category", category)), ensure_ascii=False)
+        found = _for_the_model(await shelf("browse_category", category, also=also))
+        try:
+            listed = (await shopify_storefront.categories())["categories"]
+            found["all_categories"] = [f"{c.get('name')} ({c.get('product_count')})" for c in listed]
+        except (ShopifyError, KeyError, ValueError):
+            pass
+        return json.dumps(found, ensure_ascii=False)
     except (ShopifyError, KeyError, ValueError) as exc:
         return _fail("browse_category", exc)
 
