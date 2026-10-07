@@ -903,6 +903,18 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 taught = await lessons.recall(db, last_reply, req.message, turn_understood)
             if taught:
                 turn_briefing = f"{turn_briefing}\n{taught}" if turn_briefing else taught
+            # Every category the shop has, read from the shop (cached): what the
+            # shopper asked for may span several of them, and the agent can only
+            # judge that if it knows they exist before it opens one.
+            try:
+                listed = (await shopify_storefront.categories())["categories"]
+                shelves = ", ".join(f"{c.get('name')} ({c.get('product_count')})" for c in listed)
+                ours = (f"[Our categories, with how many pieces in each: {shelves}. When what they "
+                        "ask for covers more than one of these, open all of them together - "
+                        "browse_category with one and the rest in also.]")
+                turn_briefing = f"{turn_briefing}\n{ours}" if turn_briefing else ours
+            except (ShopifyError, KeyError, ValueError):
+                logger.warning("Could not list categories for the briefing", exc_info=True)
             asking = with_context(req.message, turn_briefing)
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any
