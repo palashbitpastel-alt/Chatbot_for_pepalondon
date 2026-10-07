@@ -259,6 +259,7 @@ def _card(item: dict) -> dict:
     return {
         "product_id": item.get("product_id"),
         "variant_id": item.get("variant_id"),
+        **({"handle": item["handle"]} if item.get("handle") else {}),
         "title": item.get("title"),
         "option": item.get("option"),
         # The colour/size the shopper asked for, so the card opens with them picked.
@@ -429,7 +430,10 @@ def split_show(reply: str) -> tuple[str, list[str] | str | None]:
         return text, "all"
     if body in ("none", "", "-"):
         return text, []
-    return text, [x for x in re.findall(r"\d{5,}", body)]
+    # Product ids, or handles ("mary-jane-baby-shoes"): a long id is easy for
+    # the model to mistype into another product's; a handle is not.
+    return text, [t for t in (x.strip() for x in re.split(r"[,\s]+", body))
+                  if re.fullmatch(r"\d{5,}", t) or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)+", t)]
 
 
 def _not_a_shelf(products: dict, items: list[dict]) -> dict:
@@ -552,7 +556,9 @@ class CardCollector:
                 # suggest_pieces carries the variant and size they chose, and the
                 # list's bare card opened the piece on "Choose size" instead.
                 pool[str(item.get("product_id"))] = item
-        picked = [pool[i] for i in dict.fromkeys(declared) if i in pool]
+                if item.get("handle"):
+                    pool[item["handle"]] = item
+        picked = list({id(pool[i]): pool[i] for i in dict.fromkeys(declared) if i in pool}.values())
         if not picked:
             return False
         self.products = {"items": picked, "currency": currency}
