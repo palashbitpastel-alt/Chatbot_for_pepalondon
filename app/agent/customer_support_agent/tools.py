@@ -619,8 +619,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     (3 months = 0.25, 9 months = 0.75). size: the child's size or age exactly as the
     shopper said it ("3 months", "5Y") - pass it whenever you know it. for_who: "boy", "girl" or "baby". colour: as they
     said it, e.g. "navy". occasion: their words, e.g. "birthday party".
-    category: the kind of piece they named - "dress", "coat", "shoes". ALWAYS
-      pass it when they named one: "a dress for a wedding" must come back as
+    category: one of our categories (the briefing lists them) - only pieces
+      of that one category come back. When their word covers more than one of
+      ours, leave it empty and choose from the pieces yourself: each says what
+      kind it is. Otherwise ALWAYS pass it when they named one: "a dress for a wedding" must come back as
       several dresses to choose between, not one dress and three other things.
       Leave it empty for "an outfit" or a gift. Asked what we have for an
       occasion ("what do you have for her birthday"), pass the main kind that
