@@ -1273,8 +1273,9 @@ async def _collection_product_ids(collection_id: str, limit: int) -> list[str]:
     return [n["legacyResourceId"] for n in nodes if n.get("legacyResourceId")]
 
 
-async def _collection_named(term: str) -> dict | None:
-    """A collection from a numeric id, a handle, or its name."""
+async def _collection_named(term: str, exact_only: bool = False) -> dict | None:
+    """A collection from a numeric id, a handle, or its name. exact_only: only a
+    handle or title that matches exactly, never Shopify's loose title match."""
     gid = _COLLECTION_GID_RE.match(term)
     numeric = gid.group(1) if gid else (term if _DIGITS_RE.match(term) else None)
     if numeric:
@@ -1294,56 +1295,9 @@ async def _collection_named(term: str) -> dict | None:
             n for n in nodes
             if n["handle"].lower() == slug or n["title"].strip().lower() == term.lower()
         ]
-        chosen = exact or nodes
+        chosen = exact or ([] if exact_only else nodes)
         if chosen:
             return _collection_as_category(chosen[0])
-    return None
-
-
-# What a shopper calls it -> the category id the store keeps it under. Only
-# words for things actually stocked: a synonym pointing at a category the shop
-# does not have resolves to nothing, which is the same as not listing it.
-_CATEGORY_SYNONYMS = {
-    "pant": "trousers", "pants": "trousers", "trouser": "trousers",
-    "legging": "trousers", "leggings": "trousers", "bottoms": "trousers",
-    "pyjama": "sleepsuit", "pyjamas": "sleepsuit", "pajama": "sleepsuit",
-    "pajamas": "sleepsuit", "pjs": "sleepsuit", "sleepwear": "sleepsuit",
-    "nightwear": "sleepsuit", "onesie": "sleepsuit", "babygrow": "sleepsuit",
-    "babygro": "sleepsuit", "sleepsuits": "sleepsuit",
-    "sneaker": "shoes", "sneakers": "shoes", "trainer": "shoes",
-    "trainers": "shoes", "plimsoll": "shoes", "plimsolls": "shoes",
-    "pump": "shoes", "pumps": "shoes", "footwear": "shoes",
-    "jumper": "sweater", "jumpers": "sweater", "pullover": "sweater",
-    "knit": "sweater", "knitwear": "sweater", "sweatshirt": "sweater",
-    "wellies": "boots", "wellingtons": "boots", "bootie": "boots",
-    "booties": "boots",
-    "tee": "shirt", "tshirt": "shirt", "top": "shirt", "tops": "shirt",
-    "beanie": "hat", "cap": "hat", "sunhat": "hat", "bonnet": "hat",
-    "hats": "hat",
-    "headband": "hairband", "bow": "hairband", "bows": "hairband",
-    "hairbow": "hairband", "clip": "hairband", "clips": "hairband",
-    "shades": "sunglasses", "sunnies": "sunglasses", "glasses": "sunglasses",
-    "teddy": "toys", "bear": "toys", "softtoy": "toys", "comforter": "toys",
-    "toy": "toys",
-    "blankie": "blanket", "swaddle": "blanket", "throw": "blanket",
-    "playsuit": "romper", "dungarees": "romper", "rompers": "romper",
-    "purse": "bag", "tote": "bag", "bags": "bag",
-    "glove": "mittens", "gloves": "mittens", "mitten": "mittens",
-    "sock": "socks",
-    "pinafore": "dress", "frock": "dress", "gown": "dress",
-}
-
-
-def _synonym_target(term: str, listed: list[dict]) -> dict | None:
-    """The category a shopper's own word points at, if we stock it."""
-    slug = slugify(term)
-    for candidate in [slug, *slug.split("-")]:
-        target = _CATEGORY_SYNONYMS.get(candidate)
-        if not target:
-            continue
-        for entry in listed:
-            if entry["id"] == target:
-                return entry
     return None
 
 
@@ -1357,13 +1311,10 @@ _TYPO_MIN_LENGTH = 4
 def _typo_target(term: str, listed: list[dict]) -> dict | None:
     """The category a misspelling was reaching for - "paijamas", "dreses".
 
-    Matched against our own category names and every word a shopper might use
-    for one, so a slip in either vocabulary still lands.
+    Matched against our own category names only.
     """
     vocabulary: dict[str, str] = {e["id"]: e["id"] for e in listed}
     vocabulary.update({slugify(e["name"]): e["id"] for e in listed})
-    vocabulary.update({alias: target for alias, target in _CATEGORY_SYNONYMS.items()
-                       if any(e["id"] == target for e in listed)})
 
     for candidate in [slugify(term), *slugify(term).split("-")]:
         if len(candidate) < _TYPO_MIN_LENGTH:
@@ -1395,6 +1346,16 @@ async def find_category(reference: str) -> dict | None:
         names = (entry["id"].lower(), entry["name"].lower(), (entry.get("product_type") or "").lower())
         if lowered in names or (entry.get("taxonomy_id") and term == entry["taxonomy_id"]):
             return _type_as_category(entry)
+    # A collection named exactly - its handle from the page they are on, or its
+    # title - before any partial match: "shoes-boots" is the Shoes & Boots
+    # collection, not the Shoes type its first word starts.
+    try:
+        exact = await _collection_named(term, exact_only=True)
+    except (ShopifyError, KeyError, ValueError):
+        logger.warning("Collection lookup failed for %r", term, exc_info=True)
+        exact = None
+    if exact is not None:
+        return exact
     # "dresses" should still reach "dress"; two letters would match far too much.
     if len(slug) >= 3:
         for entry in listed:
@@ -1412,13 +1373,6 @@ async def find_category(reference: str) -> dict | None:
         named = None
     if named is not None:
         return named
-
-    # The shopper's own word for one of our categories - "pants" for Trousers,
-    # "pyjamas" for a Sleepsuit. Checked before the loose word match below so
-    # the mapping wins over an accidental prefix collision.
-    synonym = _synonym_target(term, listed)
-    if synonym is not None:
-        return _type_as_category(synonym)
 
     typo = _typo_target(term, listed)
     if typo is not None:

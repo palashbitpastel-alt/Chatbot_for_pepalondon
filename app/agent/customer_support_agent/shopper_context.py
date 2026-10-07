@@ -13,6 +13,7 @@ credential for changing that cart rather than something the agent needs.
 """
 
 from decimal import Decimal
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -95,6 +96,18 @@ class PageContext(BaseModel):
     cards_on_screen: list[str] | None = Field(default=None, max_length=20)
 
 
+def _collection_on_screen(context: PageContext) -> str | None:
+    """The handle of the collection page they are on, read from its address."""
+    if not context.page_url or context.viewing_product:
+        return None
+    parts = [unquote(p) for p in urlparse(context.page_url).path.split("/") if p]
+    if "collections" in parts:
+        at = parts.index("collections")
+        if at + 1 < len(parts) and "products" not in parts[at + 1:]:
+            return parts[at + 1][:120]
+    return None
+
+
 def _money(minor: int | None, currency: str | None) -> str | None:
     if minor is None:
         return None
@@ -120,6 +133,10 @@ def describe(
             lines.append(f'Looking at: the product page for "{context.viewing_product}"')
         elif context.template:
             lines.append(f"Looking at: the {where} page")
+        if shelf := _collection_on_screen(context):
+            lines.append(f'The collection on their screen is "{shelf}" - browse_category with that handle '
+                         "opens exactly what they are looking at. Whether their message is about it is "
+                         "your call.")
         shown_in = context.currency or (customer.currency if customer else None)
         if shown_in:
             place = f" in {context.country}" if context.country else ""
