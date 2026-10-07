@@ -23,6 +23,7 @@ CARD_TOOLS = {
 
     "get_best_sellers": "products",
     "browse_catalogue": "products",
+    "read_every_piece": "products",
     "suggest_pieces": "products",
     "compare_products": "products",
     "recommend_for_me": "products",

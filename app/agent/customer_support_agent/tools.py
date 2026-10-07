@@ -808,6 +808,31 @@ async def browse_catalogue() -> str:
 
 
 @tool
+async def read_every_piece() -> str:
+    """Every piece we have in stock, each with what the shop says it is. No arguments.
+
+    Each piece carries its title, product type, shelf, who it is for, colours,
+    price, and "about" - one line read from everything the shop wrote about it.
+
+    Use it when what they asked for is a kind of thing described in their own
+    words rather than one of our shelves by name: read every piece and judge,
+    from its details, which ones answer them - all of them, wherever they are
+    filed. Name the best with prices, say how many there are in all, and put
+    every one of their ids in [show: ...].
+    """
+    try:
+        found = await outfit.browse_catalogue()
+        stocked = [p for p in found["products"] if p.get("in_stock")]
+        await suits.learn(stocked)
+        keep = ("product_id", "title", "product_type", "category", "for", "colors", "price_from", "image", "url")
+        pieces = [{**{k: p.get(k) for k in keep}, "about": suits.about_of(p)} for p in stocked]
+        return json.dumps({"currency": found.get("currency"), "count": len(pieces), "products": pieces},
+                          ensure_ascii=False)
+    except (ShopifyError, KeyError, ValueError) as exc:
+        return _fail("read_every_piece", exc)
+
+
+@tool
 async def budget_in_our_money(amount: float, currency: str) -> str:
     """Turn a budget they gave in another money into the one you are quoting.
 
@@ -1362,6 +1387,7 @@ CUSTOMER_SUPPORT_TOOLS = [
     remove_from_wishlist,
     forget_my_preferences,
     browse_catalogue,
+    read_every_piece,
     build_outfit,
     complete_the_look,
     find_size,
@@ -1383,7 +1409,7 @@ CUSTOMER_SUPPORT_TOOLS = [
 # India, pounds in the UK), straight from Shopify's price lists. Orders are left
 # alone: they keep the currency they were paid in.
 MARKET_PRICED = {
-    "search_products", "browse_in_size", "browse_category", "get_best_sellers", "browse_catalogue",
+    "search_products", "browse_in_size", "browse_category", "get_best_sellers", "browse_catalogue", "read_every_piece",
     "suggest_pieces", "build_outfit", "complete_the_look", "compare_products", "recommend_for_me",
     "product_details", "add_to_cart", "find_size", "show_size",
 }
