@@ -11,14 +11,19 @@ So the piece is read rather than pattern-matched. Two things decide, in order:
 
   1. What the merchant has stated. A season metafield is their own answer and
      beats anybody's reading of a product name.
-  2. Otherwise the model reads the name and description - once per product, in
-     batches, remembered afterwards - and says which occasions it suits and
-     which seasons it is worn in.
+  2. Otherwise the model reads everything the shop wrote about the piece - its
+     name, type, category, tags and whole description - once per product, in
+     batches, and says which occasions it suits, which seasons it is worn in,
+     and in one line what it is (fabric, warmth, sleeves) so the agent can judge
+     it by more than its name. The reading is kept in the database, so a deploy
+     does not throw it away, and done again only when the product changes.
 
 The only fixed vocabulary here is the labels, and they are ideas rather than
 words: a wedding is a wedding in any shop. Nothing lists which garments count.
 """
 
+import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -42,7 +47,10 @@ NEIGHBOURS = {
     "Sleepwear": (),
 }
 
-BATCH = 25
+# Smaller than it was: each piece now carries its whole description.
+BATCH = 10
+# Where the readings are kept between deploys (store_settings).
+READINGS_KEY = "product_readings"
 
 _ASK = (
     "You are reading a children's clothing shop's own product list.\n"
@@ -52,9 +60,13 @@ _ASK = (
     "Judge the piece itself, not the words in its name: a velvet dress suits a "
     "summer wedding as well as Christmas, and a nightdress is Sleepwear however "
     "pretty it is. Give every piece at least one occasion and one season, and "
-    "list several where several are true.\n\n"
+    "list several where several are true. Read everything given for each piece - "
+    "its description says what it is made of and how it is worn.\n"
+    "Also write \"about\": one short line, in plain words, of what a parent would "
+    "choose it by - what it is made of, how warm or light it is, sleeve or leg "
+    "length - taken only from what the shop wrote, never invented.\n\n"
     "{pieces}\n\n"
-    'Answer with JSON only: {{"<handle>": {{"occasions": [...], "seasons": [...]}}, ...}}'
+    'Answer with JSON only: {{"<handle>": {{"occasions": [...], "seasons": [...], "about": "..."}}, ...}}'
 )
 
 _known: dict[str, dict] = {}
@@ -80,38 +92,119 @@ def _stated_seasons(product: dict) -> list[str]:
     return out
 
 
+def _source(product: dict) -> str:
+    """Everything the shop wrote about a piece, as the reader sees it."""
+    parts = [product.get("title") or ""]
+    for label, key in (("type", "product_type"), ("category", "taxonomy"), ("tags", "tags_text")):
+        if product.get(key):
+            parts.append(f"{label}: {product[key]}")
+    text = product.get("description") or product.get("about") or ""
+    if text:
+        parts.append(text)
+    return " | ".join(parts)
+
+
+def _fingerprint(product: dict) -> str:
+    """Changes when what the shop wrote about the piece changes."""
+    return hashlib.sha1(_source(product).encode("utf-8")).hexdigest()[:12]
+
+
+_loaded = False
+
+
+async def _load() -> None:
+    """The readings kept from earlier runs, once per process."""
+    global _loaded
+    if _loaded:
+        return
+    _loaded = True
+    try:
+        from sqlalchemy import select
+
+        from app.db.models import StoreSetting
+        from app.db.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == READINGS_KEY))).scalar_one_or_none()
+        if row and isinstance(row.value, dict):
+            _known.update({h: r for h, r in row.value.items() if isinstance(r, dict)})
+    except Exception:  # noqa: BLE001 - the readings are a saving, never a requirement
+        logger.warning("Could not load the kept product readings", exc_info=True)
+
+
+async def _save() -> None:
+    try:
+        from sqlalchemy import select
+
+        from app.db.models import StoreSetting
+        from app.db.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == READINGS_KEY))).scalar_one_or_none()
+            if row is None:
+                db.add(StoreSetting(key=READINGS_KEY, value=dict(_known)))
+            else:
+                row.value = dict(_known)
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not keep the product readings", exc_info=True)
+
+
 async def learn(products: list[dict]) -> dict[str, dict]:
-    """Read the pieces we have not read yet. Cached for the life of the process."""
-    unread = [p for p in products if p.get("handle") and p["handle"] not in _known]
+    """Read the pieces we have not read yet, or that changed since. Kept in the
+    database. A batch the model could not read is left unread, so it is tried
+    again next time rather than remembered as suiting nothing."""
+    await _load()
+    unread = [p for p in products if p.get("handle")
+              and (_known.get(p["handle"]) or {}).get("from") != _fingerprint(p)]
     if not unread:
         return _known
     from app.agent.base import build_llm
 
-    model = build_llm(temperature=0, max_tokens=1500)
-    for start in range(0, len(unread), BATCH):
-        chunk = unread[start:start + BATCH]
-        lines = "\n".join(
-            f'- {p["handle"]}: {p.get("title", "")} | {(p.get("about") or p.get("description") or "")[:110]}'
-            for p in chunk)
+    model = build_llm(temperature=0, max_tokens=2500)
+    # A few batches at once: the first shopper after a change should not wait
+    # for every batch in turn.
+    gate = asyncio.Semaphore(3)
+
+    async def read_batch(chunk: list[dict]) -> bool:
+        lines = "\n".join(f'- {p["handle"]}: {_source(p)}' for p in chunk)
         try:
-            answer = await model.ainvoke(
-                _ASK.format(pieces=lines),
-                # This runs inside a shopper's turn; without its own callbacks the
-                # JSON would stream to them ahead of their answer.
-                config={"callbacks": [], "tags": ["suits"], "run_name": "learn_suits"})
+            async with gate:
+                answer = await model.ainvoke(
+                    _ASK.format(pieces=lines),
+                    # This runs inside a shopper's turn; without its own callbacks the
+                    # JSON would stream to them ahead of their answer.
+                    config={"callbacks": [], "tags": ["suits"], "run_name": "learn_suits"})
             text = answer.content if hasattr(answer, "content") else str(answer)
             block = re.search(r"\{.*\}", text, re.S)
             read = json.loads(block.group(0)) if block else {}
         except Exception:  # noqa: BLE001 - never fail a shopper's turn over this
             logger.warning("Could not read what %d pieces are for", len(chunk), exc_info=True)
-            read = {}
+            return False
+        got = False
         for piece in chunk:
-            found = read.get(piece["handle"]) or {}
+            found = read.get(piece["handle"])
+            if not isinstance(found, dict):
+                continue
             _known[piece["handle"]] = {
                 "occasions": [o for o in (found.get("occasions") or []) if o in OCCASIONS],
                 "seasons": [s for s in (found.get("seasons") or []) if s in SEASONS],
+                "about": str(found.get("about") or "").strip()[:200] or None,
+                "from": _fingerprint(piece),
             }
+            got = True
+        return got
+
+    done = await asyncio.gather(*(read_batch(unread[i:i + BATCH]) for i in range(0, len(unread), BATCH)))
+    learned = any(done)
+    if learned:
+        await _save()
     return _known
+
+
+def about_of(product: dict) -> str | None:
+    """One line of what the piece is, read off everything the shop wrote."""
+    return (_known.get(product.get("handle") or "") or {}).get("about")
 
 
 def occasions_of(product: dict) -> list[str]:

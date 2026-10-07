@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -34,6 +35,16 @@ async def enable_pgvector() -> None:
         logger.warning("Could not enable the pgvector extension", exc_info=True)
 
 
+async def _read_products() -> None:
+    try:
+        from app.services import outfit, suits
+
+        catalogue = await outfit.browse_catalogue()
+        await suits.learn([p for p in catalogue["products"] if p["in_stock"]])
+    except Exception:  # noqa: BLE001 - a shopper's turn reads them anyway
+        logger.warning("Could not read the products at startup", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.is_postgres:
@@ -54,6 +65,10 @@ async def lifespan(app: FastAPI):
             logger.info("Handbook index: %s", await handbook.reindex(session))
     except Exception:
         logger.exception("Could not index the store handbook")
+
+    # Read what every product is for, worn when, and made of - in the background,
+    # so the first shopper does not wait for it. Kept in the database after.
+    asyncio.create_task(_read_products())
 
     logger.info(
         "Retrieval backend: %s (%s)",

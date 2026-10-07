@@ -66,7 +66,7 @@ query OutfitCatalogue($query: String!, $first: Int!, $variants: Int!, $cursor: S
       productType
       tags
       onlineStoreUrl
-      description(truncateAt: 240)
+      description(truncateAt: 1500)
       category { fullName }
       season: metafield(namespace: "custom", key: "season") { value }
       featuredMedia { ... on MediaImage { image { url altText } } }
@@ -237,6 +237,10 @@ async def browse_catalogue() -> dict:
                 "category": _category(node["title"], node.get("productType")),
                 "taxonomy": (node.get("category") or {}).get("fullName"),
                 "season": ((node.get("season") or {}).get("value") or None),
+                # What the shop wrote about it, for the model to read (see suits).
+                "description": node.get("description") or None,
+                "product_type": node.get("productType") or None,
+                "tags_text": ", ".join(node.get("tags") or []) or None,
                 # What it IS, for the store's own shelves, versus what it DOES
                 # in an outfit. A "Coat" and a "Jacket" are two product types
                 # and one role, and only the role knows what goes with what.
@@ -774,6 +778,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "category": p["category"],
                 "worn_for": ", ".join(suits.occasions_of(p)) or None,
                 "seasons": ", ".join(suits.seasons_of(p)) or None,
+                "about": suits.about_of(p),
                 "part": _role_of(p),
                 "price_from": p["price_from"],
                 "currency": catalogue["currency"],
@@ -1045,6 +1050,7 @@ async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budge
     await suits.learn(pool)
     candidates = [{"handle": p["handle"], "title": p["title"],
                    "worn_for": suits.occasions_of(p) or None, "seasons": suits.seasons_of(p) or None,
+                   "about": suits.about_of(p),
                    "part": p.get("role") or _category(p["title"], None), "kind": p["category"],
                    "colours": colours_in_size(p), "price": p["price_from"]} for p in pool]
     brief = {
