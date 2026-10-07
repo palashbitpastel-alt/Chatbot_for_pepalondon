@@ -19,7 +19,7 @@ import time
 from urllib.parse import quote
 
 from app.core.config import settings
-from app.services import audience
+from app.services import audience, shopify_search
 from app.services.shopify_client import ShopifyError, graphql, store_domain
 
 logger = logging.getLogger(__name__)
@@ -392,12 +392,27 @@ def _public_product(node: dict, currency: str) -> dict:
 async def search_products(query: str = "", limit: int = PRODUCT_LIMIT) -> dict:
     """Search the live catalogue. Only ACTIVE products — a shopper cannot buy a draft."""
     term = " ".join(query.split()).strip()
+    first = max(1, min(limit, PRODUCT_LIMIT))
+    currency = (await shop_info())["currency"]
+    # Shopify's own storefront search first - relevance, every field, and the
+    # merchant's synonyms - then read those products here, in its order.
+    ranked = await shopify_search.product_ids(term, first) if term else None
+    if ranked:
+        data = await graphql(
+            PRODUCT_SEARCH,
+            {"query": sellable("(" + " OR ".join(f"id:{i}" for i in ranked) + ")"),
+             "first": first, "variants": VARIANT_LIMIT},
+        )
+        order = {i: n for n, i in enumerate(ranked)}
+        products = sorted((_public_product(n, currency) for n in data["products"]["nodes"]),
+                          key=lambda p: order.get(str(p.get("product_id")), len(order)))
+        if products:
+            return {"query": term, "currency": currency, "count": len(products), "products": products}
     # The agent supplies only the term; the status filter is ours and always applied.
     search = sellable(f"({term})" if term else "")
-    currency = (await shop_info())["currency"]
     data = await graphql(
         PRODUCT_SEARCH,
-        {"query": search, "first": max(1, min(limit, PRODUCT_LIMIT)), "variants": VARIANT_LIMIT},
+        {"query": search, "first": first, "variants": VARIANT_LIMIT},
     )
     products = [_public_product(n, currency) for n in data["products"]["nodes"]]
     return {"query": term, "currency": currency, "count": len(products), "products": products}

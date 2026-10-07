@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     SHOPIFY_CLIENT_SECRET: str = ""
     SHOPIFY_STORE_URL: str = ""
     SHOPIFY_ACCESS_TOKEN: str = ""
+    # Storefront API token for Shopify's own search (see services/shopify_search).
+    # Optional: without it the app tries to make one, then uses the Admin search.
+    SHOPIFY_STOREFRONT_TOKEN: str = ""
     # Kept level with .env.example. It is not cosmetic: orderCancel took a
     # boolean `refund` on older versions and an OrderCancelRefundMethodInput on
     # current ones, so a stale default here fails the cancellation at runtime.
