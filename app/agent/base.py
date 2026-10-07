@@ -58,7 +58,8 @@ class Agent:
 
 
 # Room for Gemini's thinking on top of the answer itself, which shares max_tokens.
-_GEMINI_THINKING_TOKENS = 1024
+# 1024 cut a product list off mid-line when the thinking ran long.
+_GEMINI_THINKING_TOKENS = 3072
 
 
 # While DeepSeek is out of credit or refuses its key, every call would wait for
