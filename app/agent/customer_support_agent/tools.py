@@ -742,6 +742,13 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
         # their size. The suggestions outside it are ideas, not part of that
         # total: counting them told a 5 year old's family "26" over 19 cards.
         result["count"] = sum(1 for p in result["products"] if p.get("in_their_size"))
+        if not kind:
+            # Their whole size, not the first SHELF_FOR_MODEL of it the agent
+            # reads: "what do you have" said 19 where "show me everything" said
+            # 21 for the same boy. The storefront pages through the rest.
+            result["count"] = len(everything)
+            if found.get("shelf"):
+                result["shelf"] = found["shelf"]
 
 
 @tool
