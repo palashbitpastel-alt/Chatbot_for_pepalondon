@@ -636,7 +636,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     range when they asked generally. With a kind, every piece of it comes back,
     best fit first: show them all ([show: all]) - name up to six with prices and
     say how many there are in all. Given a size, count is how many are sold in
-    their size: that is the total to give, and a total always goes with [show: all]. in_their_size=false: not made in their exact
+    their size, whatever the season or occasion: give it only when their whole
+    size is the answer, and then with [show: all]. When you choose the pieces that
+    suit a wish of theirs (a season, an occasion, a kind), show just those and
+    never quote the whole-size total over them. in_their_size=false: not made in their exact
     size - its sizes list says which are nearest (a 7 year old: 6Y or 8Y). Offer
     it honestly with that size ("comes in 8Y, room to grow"); never say a piece
     comes in their size unless in_their_size is true. largest_we_make marks pieces in our biggest size when the child is

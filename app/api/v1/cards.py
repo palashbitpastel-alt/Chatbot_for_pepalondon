@@ -554,32 +554,9 @@ class CardCollector:
         picked = [pool[i] for i in dict.fromkeys(declared) if i in pool]
         if not picked:
             return False
-        rest, source = self._rest_in_their_size(picked)
-        self.products = {"items": picked + rest, "currency": currency}
-        if source and source.get("shelf"):
-            # Their whole size is a shelf: the storefront pages through what the
-            # agent did not read, so every piece of the total can be opened.
-            self.products.update(shelf=source["shelf"], total=source.get("total"))
+        self.products = {"items": picked, "currency": currency}
         self.products_fixed = True
         return True
-
-    def _rest_in_their_size(self, picked: list[dict]) -> tuple[list[dict], dict | None]:
-        """The other pieces sold in the child's size, after the ones the reply named.
-
-        A size-aware lookup counts what the child can wear, and the reply gives
-        that total ("19 pieces in all") while naming a handful. Every counted
-        piece must be reachable: the named ones lead, the rest follow and the
-        storefront folds them behind "+N more"."""
-        ids = {str(i.get("product_id")) for i in picked}
-        if not all(i.get("in_their_size") for i in picked):
-            return [], None
-        for tool_name, result in self.product_results:
-            items = result.get("items") or []
-            if tool_name != "suggest_pieces" or not ids <= {str(i.get("product_id")) for i in items}:
-                continue
-            return [i for i in items if i.get("in_their_size") and not i.get("other_kind")
-                    and str(i.get("product_id")) not in ids], result
-        return [], None
 
     def finalise(self, reply: str, narrowed: bool = True, narrowed_past_size: bool | None = None,
                  declared: list[str] | str | None = None) -> None:
