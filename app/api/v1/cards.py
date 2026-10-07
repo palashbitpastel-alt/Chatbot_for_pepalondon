@@ -280,6 +280,7 @@ def _card(item: dict) -> dict:
         **({"needs": item["needs"]} if item.get("needs") else {}),
         # Whether the shop sells it in the child's own size, when a size is known.
         **({"in_their_size": item["in_their_size"]} if "in_their_size" in item else {}),
+        **({"other_kind": True} if item.get("other_kind") else {}),
     }
 
 
@@ -553,9 +554,28 @@ class CardCollector:
         picked = [pool[i] for i in dict.fromkeys(declared) if i in pool]
         if not picked:
             return False
+        picked += self._rest_in_their_size(picked)
         self.products = {"items": picked, "currency": currency}
         self.products_fixed = True
         return True
+
+    def _rest_in_their_size(self, picked: list[dict]) -> list[dict]:
+        """The other pieces sold in the child's size, after the ones the reply named.
+
+        A size-aware lookup counts what the child can wear, and the reply gives
+        that total ("19 pieces in all") while naming a handful. Every counted
+        piece must be reachable: the named ones lead, the rest follow and the
+        storefront folds them behind "+N more"."""
+        ids = {str(i.get("product_id")) for i in picked}
+        if not all(i.get("in_their_size") for i in picked):
+            return []
+        for tool_name, result in self.product_results:
+            items = result.get("items") or []
+            if tool_name != "suggest_pieces" or not ids <= {str(i.get("product_id")) for i in items}:
+                continue
+            return [i for i in items if i.get("in_their_size") and not i.get("other_kind")
+                    and str(i.get("product_id")) not in ids]
+        return []
 
     def finalise(self, reply: str, narrowed: bool = True, narrowed_past_size: bool | None = None,
                  declared: list[str] | str | None = None) -> None:
