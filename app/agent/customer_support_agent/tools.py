@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.services import compare, extras, handbook, market, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile
+from app.services import compare, extras, handbook, market, multi_buy, order_changes, outfit, shopify_storefront, size_finder, store_profile, suits
 from app.services import shopper_identity as identity
 from app.services.shopify_client import ShopifyError, store_domain
 
@@ -640,7 +640,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     their size, whatever the season or occasion: give it only when their whole
     size is the answer, and then with [show: all]. When you choose the pieces that
     suit a wish of theirs (a season, an occasion, a kind), show just those and
-    never quote the whole-size total over them. in_their_size=false: not made in their exact
+    never quote the whole-size total over them. Asked about a season: every piece
+    with for_their_season=true is worn then (read off its description) - those
+    are the answer, all of their ids go in [show: ...], and count_for_their_season
+    is how many there are. in_their_size=false: not made in their exact
     size - its sizes list says which are nearest (a 7 year old: 6Y or 8Y). Offer
     it honestly with that size ("comes in 8Y, room to grow"); never say a piece
     comes in their size unless in_their_size is true. largest_we_make marks pieces in our biggest size when the child is
@@ -720,8 +723,9 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
             if p["in_their_size"] and in_size.get(str(p.get("product_id"))) and not p.get("in_this_size"):
                 p["in_this_size"] = in_size[str(p.get("product_id"))]
     shown = {str(p.get("product_id")) for p in picks}
-    keep = ("product_id", "variant_id", "title", "category", "for", "price_from", "currency",
+    keep = ("handle", "product_id", "variant_id", "title", "category", "for", "price_from", "currency",
             "in_this_size", "image", "url")
+    season = identity.shopping_season()
     if nearest:
         result["largest_size_we_make"] = size
     else:
@@ -734,6 +738,9 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
         # Its option, stock and photo too, so the card can open on a colour the
         # shopper has not turned down.
         return {**{k: p.get(k) for k in keep}, **flags,
+                # The same reading of the piece the suggestions carry.
+                "seasons": ", ".join(suits.seasons_of(p)) or None, "about": suits.about_of(p),
+                "for_their_season": suits.for_season(p, season),
                 "variants": [{k: v.get(k) for k in ("variant_id", "price", "option", "available", "image")}
                              for v in p.get("variants") or []]}
 
@@ -753,6 +760,9 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
             result["count"] = len(everything)
             if found.get("shelf"):
                 result["shelf"] = found["shelf"]
+        if season:
+            # Of their size, the pieces worn in the season they asked about.
+            result["count_for_their_season"] = sum(1 for p in everything if suits.for_season(p, season))
 
 
 @tool

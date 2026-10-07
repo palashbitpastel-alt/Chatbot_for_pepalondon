@@ -770,6 +770,10 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
         # a child this old, so a shoe in the look is not a guess.
         "typical_shoe_eu_for_age": _typical_shoe_eu(age),
         "count": len(picked),
+        # How many of them are worn in the season they asked about, by each
+        # piece's own reading - the number to give for "winter clothes".
+        **({"count_for_their_season": sum(1 for p in picked if suits.for_season(p, season))}
+           if season else {}),
         "products": [
             {
                 "handle": p["handle"],
@@ -779,6 +783,7 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
                 "worn_for": ", ".join(suits.occasions_of(p)) or None,
                 "seasons": ", ".join(suits.seasons_of(p)) or None,
                 "about": suits.about_of(p),
+                "for_their_season": suits.for_season(p, season),
                 "part": _role_of(p),
                 "price_from": p["price_from"],
                 "currency": catalogue["currency"],

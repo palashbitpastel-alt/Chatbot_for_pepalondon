@@ -202,6 +202,17 @@ async def learn(products: list[dict]) -> dict[str, dict]:
     return _known
 
 
+def for_season(product: dict, season: str | None) -> bool | None:
+    """Whether the piece is worn in this season, by the merchant's word or the
+    model's reading of the piece. None when there is no season or no reading."""
+    if not season:
+        return None
+    seasons = seasons_of(product)
+    if not seasons:
+        return None
+    return any(season.lower() in s.lower() or "all year" in s.lower() for s in seasons)
+
+
 def about_of(product: dict) -> str | None:
     """One line of what the piece is, read off everything the shop wrote."""
     return (_known.get(product.get("handle") or "") or {}).get("about")
