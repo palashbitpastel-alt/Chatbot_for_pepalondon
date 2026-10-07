@@ -278,6 +278,8 @@ def _card(item: dict) -> dict:
         "because": item.get("because"),
         # What the shopper still has to choose before this piece can be bagged.
         **({"needs": item["needs"]} if item.get("needs") else {}),
+        # Whether the shop sells it in the child's own size, when a size is known.
+        **({"in_their_size": item["in_their_size"]} if "in_their_size" in item else {}),
     }
 
 
@@ -527,6 +529,13 @@ class CardCollector:
             return False
         if declared == "all":
             if self.products is not None:
+                # "All" is every piece the agent counted - the ones sold in the
+                # child's size. The outfit ideas outside it (a baby bonnet beside
+                # a 5 year old's shirts) are not part of that count.
+                items = self.products.get("items") or []
+                fits = [i for i in items if i.get("in_their_size") is not False]
+                if len(fits) < len(items) and any(i.get("in_their_size") for i in fits):
+                    self.products = {**self.products, "items": fits}
                 self.products_fixed = True
             return True
         if not declared:
