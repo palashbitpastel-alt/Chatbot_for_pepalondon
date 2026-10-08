@@ -182,6 +182,22 @@ async def install(id_token: str) -> str:
     return shop
 
 
+async def save_settings(shop: str, values: dict) -> dict:
+    """Save the shop's settings from the admin page (checked), return them all."""
+    from app.services import widget_settings
+    shop = shops.normalise(shop)
+    merged = {**settings_for(shop), **widget_settings.clean(values)}
+    async with AsyncSessionLocal() as db:
+        row = await db.get(Shop, shop)
+        if row is None:
+            row = Shop(domain=shop)
+            db.add(row)
+        row.settings = merged
+        await db.commit()
+    _installed.setdefault(shop, {"token": None, "scopes": "", "settings": {}})["settings"] = merged
+    return merged
+
+
 async def uninstall(shop: str) -> None:
     shop = shops.normalise(shop)
     async with AsyncSessionLocal() as db:

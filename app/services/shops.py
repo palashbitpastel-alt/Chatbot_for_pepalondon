@@ -75,12 +75,15 @@ def setting(field: str, default_shop_value: str = "") -> str:
     """A per-shop text setting: name, description, welcome_message,
     welcome_collections, catalogue_filter. The default shop keeps its Railway variables; another
     shop reads SUPPORT_SHOP_SETTINGS, a JSON object keyed by shop domain."""
-    if is_default():
-        return default_shop_value
+    # What the merchant saved in the app's admin page comes first, for every
+    # shop; then the Railway variables (default shop) or SUPPORT_SHOP_SETTINGS.
     from app.services import installs
-    saved = installs.settings_for(current()).get(field)
+    saved_as = {"name": "store_name", "description": "store_description"}.get(field, field)
+    saved = installs.settings_for(current()).get(saved_as)
     if saved:
         return str(saved)
+    if is_default():
+        return default_shop_value
     try:
         profiles = json.loads(settings.SUPPORT_SHOP_SETTINGS or "{}")
     except ValueError:
