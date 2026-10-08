@@ -6,7 +6,8 @@ reads it once per request and everything downstream - the Shopify client,
 every cache, every saved setting - asks ``current()``.
 
 Only shops on the allowed list are served: the default shop
-(SHOPIFY_STORE_URL) plus SUPPORT_SHOPS. A request naming any other shop is
+(SHOPIFY_STORE_URL), SUPPORT_SHOPS, and every shop that installed the app
+(saved by the install itself - see services/installs). A request naming any other shop is
 refused, and a request naming none is the default shop, so a widget that
 predates this keeps working unchanged.
 
@@ -24,6 +25,7 @@ from app.core.config import settings
 
 _current: ContextVar[str | None] = ContextVar("current_shop", default=None)
 _DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
+_OWN_CHECKS = ("/api/v1/shopify/app", "/api/v1/shopify/webhooks")
 
 
 def normalise(domain: str | None) -> str:
@@ -36,8 +38,10 @@ def default() -> str:
 
 
 def allowed() -> set[str]:
+    """The default shop, SUPPORT_SHOPS, and every shop that installed the app."""
+    from app.services import installs
     extra = {normalise(d) for d in (settings.SUPPORT_SHOPS or "").split(",") if d.strip()}
-    return {d for d in extra | {default()} if d}
+    return {d for d in extra | {default()} | installs.installed() if d}
 
 
 def current() -> str:
@@ -73,6 +77,10 @@ def setting(field: str, default_shop_value: str = "") -> str:
     shop reads SUPPORT_SHOP_SETTINGS, a JSON object keyed by shop domain."""
     if is_default():
         return default_shop_value
+    from app.services import installs
+    saved = installs.settings_for(current()).get(field)
+    if saved:
+        return str(saved)
     try:
         profiles = json.loads(settings.SUPPORT_SHOP_SETTINGS or "{}")
     except ValueError:
@@ -100,6 +108,10 @@ class ShopMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+        # The install page and Shopify's webhooks name shops that are not saved
+        # yet (that is what they are for) and check Shopify's own signature.
+        if scope.get("path", "").startswith(_OWN_CHECKS):
             return await self.app(scope, receive, send)
         asked = normalise(_requested(scope))
         if asked and (not _DOMAIN_RE.match(asked) or asked not in allowed()):

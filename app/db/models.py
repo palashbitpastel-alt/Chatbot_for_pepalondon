@@ -118,3 +118,21 @@ class KnowledgeChunk(Base):
     embedding_model: Mapped[str] = mapped_column(String(100))
     embedding = mapped_column(_embedding_column_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+class Shop(Base):
+    """A shop the app is installed on, saved by the install itself.
+
+    The access token is Shopify's offline token for this shop, stored
+    encrypted (see ``services.installs``). ``uninstalled_at`` is set when
+    Shopify tells us the app was removed; the token is wiped then.
+    ``settings`` holds the shop's own text (name, description, welcome...).
+    """
+
+    __tablename__ = "shops"
+
+    domain: Mapped[str] = mapped_column(String(255), primary_key=True)
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    installed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    uninstalled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

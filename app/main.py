@@ -72,9 +72,11 @@ async def lifespan(app: FastAPI):
 
     # Read what every product is for, worn when, and made of - in the background,
     # so the first shopper does not wait for it. Kept in the database after.
+    # Shops that installed the app, saved by their installs.
+    from app.services import installs, shops
+    await installs.load()
     # Every shop this backend serves, so a newly added shop's first question
     # does not wait for its whole catalogue to be read.
-    from app.services import shops
     for shop in sorted(shops.allowed()):
         asyncio.create_task(_read_products(shop))
 

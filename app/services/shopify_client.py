@@ -57,6 +57,11 @@ async def access_token(force_refresh: bool = False) -> str:
     # A fixed token belongs to the default shop only.
     if settings.SHOPIFY_ACCESS_TOKEN and shops.is_default():
         return settings.SHOPIFY_ACCESS_TOKEN
+    # A shop that installed the app has its own offline token, saved at install.
+    from app.services import installs
+    saved = installs.token_for(shop)
+    if saved:
+        return saved
     async with _token_lock:
         held = _tokens.get(shop)
         if held and not force_refresh and time.monotonic() < held[1]:

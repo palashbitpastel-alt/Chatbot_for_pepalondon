@@ -6,41 +6,38 @@ it depends on Railway, so it runs on any host that runs Python or Docker.
 
 ## Serving several shops from one backend
 
-One backend answers every shop the app is installed on. Each shop is kept
-separate: its own Shopify access, catalogue, caches, saved product readings and
-chat history.
+One backend answers every shop the app is installed on, each kept separate: its
+own Shopify access, catalogue, caches, saved product readings and chat history.
 
-1. **Install the app on the shop.** Dev Dashboard > Pepa AI Chatbot >
-   Distribution / Install app, choose the shop, approve the permissions. The
-   backend then gets that shop's access with the same `SHOPIFY_CLIENT_ID` and
-   `SHOPIFY_CLIENT_SECRET` (client credentials; the shop must be in the same
-   organisation as the app).
-2. **Allow the shop on the backend.** Add its permanent myshopify domain to
-   `SUPPORT_SHOPS` (comma separated):
+**Installing is all it takes.** When a merchant installs the app, Shopify opens
+the app's page (`/api/v1/shopify/app`) with a signed token naming the shop. The
+backend checks the signature, swaps the token for the shop's own access token
+and saves the shop in the `shops` table (token encrypted). From then on it
+serves that shop. Uninstalling (the `app/uninstalled` webhook) wipes the token.
+The merchant then switches the assistant on in Theme editor > App embeds; the
+app's page has a button that opens it there.
 
-   ```
-   SUPPORT_SHOPS=second-store.myshopify.com,third-store.myshopify.com
-   ```
+Optional extras, set as environment variables:
 
-   `SHOPIFY_STORE_URL` stays the default shop. A shop that is not listed is
-   refused.
-3. **Give it its own text (optional).** `SUPPORT_SHOP_SETTINGS` is a JSON
-   object keyed by domain. Every field is optional; a shop with none uses its
-   Shopify name and no description.
+- `SUPPORT_SHOPS`: shops to serve without an install (comma separated
+  myshopify domains). Rarely needed now.
+- `SUPPORT_SHOP_SETTINGS`: a JSON object keyed by domain with a shop's text -
+  `name`, `description`, `welcome_message`, `welcome_collections`,
+  `catalogue_filter` - until each shop sets its own in an admin page. A shop
+  with none uses its Shopify name and no description.
+- `CORS_ORIGINS`: storefronts on `*.myshopify.com` are allowed already; a shop
+  served from its own domain (www.example.com) needs that origin here.
 
-   ```
-   SUPPORT_SHOP_SETTINGS={"second-store.myshopify.com": {"name": "Second Store", "description": "toys and gifts for children", "welcome_message": "", "welcome_collections": "", "catalogue_filter": ""}}
-   ```
+The default shop (`SHOPIFY_STORE_URL`) alone uses the handbook file and the
+reviewed answer lessons; the other shops answer from their live Shopify data.
 
-4. **Turn the assistant on in that shop's theme.** Online Store > Themes >
-   Customize > App embeds > Pepa Assistant. The Chat endpoint is the same for
-   every shop. The widget tells the backend which shop it is on by itself.
-5. **Custom domains.** Storefronts on `*.myshopify.com` are allowed already.
-   A shop served from its own domain (www.example.com) needs that origin added
-   to `CORS_ORIGINS`.
+**Who can install** depends on the app's distribution in the Dev Dashboard:
+custom distribution covers chosen stores; public distribution (Shopify App
+Store, after Shopify's review) lets any merchant install it.
 
-For now the default shop alone uses the handbook file and the reviewed answer
-lessons; the other shops answer from their live Shopify data.
+The app's address, webhooks and permissions live in `shopify.app.toml` in the
+app project and reach Shopify with `shopify app deploy`. If the backend moves
+to a new address, update the URLs there and deploy again.
 
 ## Moving to another host
 
