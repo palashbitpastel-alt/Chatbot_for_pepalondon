@@ -1005,6 +1005,17 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         except Exception:  # noqa: BLE001
             logger.exception("Could not finish the cards for session %s", session_id)
             drawn = {}
+        # A typed hello gets what the opening screen offers: the shop's own
+        # collections to tap, read live from Shopify. Only for a bare greeting
+        # that drew nothing of its own.
+        if _is_greeting(req.message) and not drawn.get("products") and not drawn.get("categories"):
+            try:
+                found = await shopify_storefront.collections(
+                    settings.SUPPORT_WELCOME_COLLECTION_LIMIT, _welcome_handles())
+                if found.get("collections"):
+                    drawn["categories"] = {"categories": found["collections"]}
+            except Exception:  # noqa: BLE001 - tiles are a nicety on a greeting
+                logger.warning("Could not load collections for the greeting", exc_info=True)
         # Saved as the shopper read it. A note of the cards used to ride along
         # here and the agent copied it into its next reply; the widget now sends
         # the cards on screen with every message instead (cards_on_screen).
@@ -1033,6 +1044,15 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         except Exception:  # noqa: BLE001 - never fail a reply over a chip row
             logger.warning("Could not build suggestions for session %s", session_id, exc_info=True)
             chips = []
+        if _is_greeting(req.message):
+            # The question the greeting asked keeps its answers first; the
+            # opening screen's shelves fill the rest of the row.
+            try:
+                labels = {c["label"] for c in chips}
+                chips = (chips + [c for c in await suggestions.for_welcome()
+                                  if c["label"] not in labels])[:suggestions.MAX_SUGGESTIONS]
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not add welcome suggestions to the greeting", exc_info=True)
         if chips:
             yield _sse("suggestions", {"suggestions": chips})
 
