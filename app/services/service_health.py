@@ -30,7 +30,7 @@ SHOPPER_MESSAGES = {
 
 OWNER_REASONS = {
     "ai_no_credit": "The AI account (DeepSeek) has run out of credit - top it up and chats work again.",
-    "ai_key_rejected": "The AI account rejected its API key - check DEEPSEEK_API_KEY on Railway.",
+    "ai_key_rejected": "The AI account rejected its API key - check GEMINI_API_KEY on Railway (or DEEPSEEK_API_KEY if DEEPSEEK_ENABLED is on).",
     "ai_busy": "The AI service is rate-limiting or overloaded - usually clears by itself.",
     "ai_timeout": "The AI service did not answer in time.",
     "store_unreachable": "The Shopify store could not be reached or refused the request.",
@@ -86,6 +86,10 @@ def record(kind: str, exc: BaseException) -> None:
 
 async def ai_status() -> dict:
     """Whether the AI can answer: DeepSeek's balance, plus the Gemini backup if set."""
+    if not settings.DEEPSEEK_ENABLED:
+        gemini = settings.GEMINI_MODEL.replace(",", ", then ")
+        return ({"ok": True, "reason": f"Gemini ({gemini}) answers every chat; DeepSeek is switched off."}
+                if settings.GEMINI_API_KEY else {"ok": False, "reason": "No GEMINI_API_KEY set."})
     status = await _deepseek_status()
     if settings.GEMINI_API_KEY:
         status["backup"] = f"Gemini ({settings.GEMINI_MODEL.replace(',', ', then ')}) answers whenever DeepSeek cannot"

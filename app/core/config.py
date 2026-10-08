@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-chat"
+    # Off: Gemini answers everything and DeepSeek is never called, even with a
+    # key set. The key stays in Railway for when credit is bought; set this to
+    # true then.
+    DEEPSEEK_ENABLED: bool = False
 
     # Backup LLM (Google Gemini, through its OpenAI-compatible endpoint). Used only
     # when a DeepSeek call fails - no credit, key rejected, outage - so chats keep

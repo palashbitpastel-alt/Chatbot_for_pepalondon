@@ -187,7 +187,8 @@ def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> Runnab
     bind_tools() passes through to every model in the chain.
     """
     resting = time.monotonic() < _deepseek_resting_until
-    chain = [_deepseek(temperature, max_tokens)] if settings.DEEPSEEK_API_KEY and not resting else []
+    use_deepseek = settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY and not resting
+    chain = [_deepseek(temperature, max_tokens)] if use_deepseek else []
     if settings.GEMINI_API_KEY:
         chain += [_gemini(m, temperature, max_tokens) for m in _gemini_models()]
     if len(chain) < 2:
