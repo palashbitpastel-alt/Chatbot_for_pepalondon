@@ -91,6 +91,12 @@ def _fields(found: dict) -> dict:
     }
 
 
+def from_memory(base: dict | None = None) -> dict:
+    """The reading for a chat that has said nothing about the child yet - a bare
+    hello: what is remembered from earlier visits, as the model would keep it."""
+    return _fields({k: v for k, v in (base or {}).items() if k in needs.REMEMBERED and v})
+
+
 async def understood(messages: list[str], base: dict | None = None, currency: str | None = None,
                      session: str | None = None) -> dict:
     """needs.understood(), read by the model. Same shape.

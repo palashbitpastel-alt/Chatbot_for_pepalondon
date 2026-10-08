@@ -68,7 +68,14 @@ _GEMINI_THINKING_TOKENS = 3072
 # Pink). After such a refusal Gemini answers alone for a while; then DeepSeek
 # is tried again, so a top-up takes effect by itself.
 DEEPSEEK_REST_SECONDS = 10 * 60
+# A key DeepSeek does not recognise will not start working by itself - a new
+# key means a new deploy, which starts the clock again - so it rests longer.
+DEEPSEEK_BAD_KEY_REST_SECONDS = 6 * 60 * 60
 _deepseek_resting_until = 0.0
+
+
+class DeepSeekResting(RuntimeError):
+    """Raised without a network call while DeepSeek rests, so the fallback answers."""
 
 
 def _deepseek_refused(exc: BaseException) -> bool:
@@ -80,6 +87,11 @@ class _DeepSeekChat(ChatOpenAI):
     """ChatOpenAI that notes when DeepSeek refuses for credit or key."""
 
     async def _agenerate(self, *args: Any, **kwargs: Any):
+        # The agent's model chain is built once, so the rest is checked here, on
+        # every call: a resting DeepSeek hands over at once instead of waiting
+        # for its refusal on each step of each reply.
+        if time.monotonic() < _deepseek_resting_until:
+            raise DeepSeekResting("DeepSeek is resting")
         try:
             return await super()._agenerate(*args, **kwargs)
         except Exception as exc:
@@ -87,6 +99,8 @@ class _DeepSeekChat(ChatOpenAI):
             raise
 
     async def _astream(self, *args: Any, **kwargs: Any):
+        if time.monotonic() < _deepseek_resting_until:
+            raise DeepSeekResting("DeepSeek is resting")
         try:
             async for chunk in super()._astream(*args, **kwargs):
                 yield chunk
@@ -98,7 +112,9 @@ class _DeepSeekChat(ChatOpenAI):
 def _note_refusal(exc: BaseException) -> None:
     global _deepseek_resting_until
     if _deepseek_refused(exc) and settings.GEMINI_API_KEY:
-        _deepseek_resting_until = time.monotonic() + DEEPSEEK_REST_SECONDS
+        bad_key = getattr(exc, "status_code", None) == 401
+        _deepseek_resting_until = time.monotonic() + (
+            DEEPSEEK_BAD_KEY_REST_SECONDS if bad_key else DEEPSEEK_REST_SECONDS)
 
 
 def _deepseek(temperature: float, max_tokens: int | None) -> ChatOpenAI:

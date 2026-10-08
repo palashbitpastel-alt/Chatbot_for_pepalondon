@@ -7,6 +7,7 @@ endpoint takes no agent name, so a public client can never point it at the
 admin agent and read internal business data.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -741,6 +742,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # in `done` as "timing" so a slow reply can be read off the live bot.
         started = time.monotonic()
         timing: dict = {}
+        greeting_tiles = greeting_chips = None
 
         def mark(step: str) -> None:
             timing.setdefault(step, round((time.monotonic() - started) * 1000))
@@ -766,9 +768,14 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # Everything they have told us in this chat, not just what the model
             # replays: the 8-row window lost the age and budget after 4 turns.
             said = (await _user_messages(session_id)) + [req.message]
-            understood = await understanding.understood(
-                said, base=remembered, currency=(req.context.currency if req.context else None),
-                session=session_id)
+            if len(said) == 1 and _is_greeting(req.message):
+                # A first "hi" says nothing about the child: no model call, just
+                # what is remembered - the same reading, three seconds sooner.
+                understood = understanding.from_memory(remembered)
+            else:
+                understood = await understanding.understood(
+                    said, base=remembered, currency=(req.context.currency if req.context else None),
+                    session=session_id)
             # Who they are shopping for, so a mixed collection comes back as
             # theirs rather than half somebody else's.
             identity.set_audience(next(
@@ -928,6 +935,12 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 logger.warning("Could not list categories for the briefing", exc_info=True)
             asking = with_context(req.message, turn_briefing)
             mark("briefing")
+            if _is_greeting(req.message):
+                # The greeting's tiles and chips are fetched while the agent
+                # writes, not after it.
+                greeting_tiles = asyncio.create_task(shopify_storefront.collections(
+                    settings.SUPPORT_WELCOME_COLLECTION_LIMIT, _welcome_handles()))
+                greeting_chips = asyncio.create_task(suggestions.for_welcome())
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any
             # tool is never re-run: it may have put something in their bag.
@@ -1025,7 +1038,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # that drew nothing of its own.
         if _is_greeting(req.message) and not drawn.get("products") and not drawn.get("categories"):
             try:
-                found = await shopify_storefront.collections(
+                found = await greeting_tiles if greeting_tiles else await shopify_storefront.collections(
                     settings.SUPPORT_WELCOME_COLLECTION_LIMIT, _welcome_handles())
                 if found.get("collections"):
                     drawn["categories"] = {"categories": found["collections"]}
@@ -1064,7 +1077,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # opening screen's shelves fill the rest of the row.
             try:
                 labels = {c["label"] for c in chips}
-                chips = (chips + [c for c in await suggestions.for_welcome()
+                welcome_chips = await greeting_chips if greeting_chips else await suggestions.for_welcome()
+                chips = (chips + [c for c in welcome_chips
                                   if c["label"] not in labels])[:suggestions.MAX_SUGGESTIONS]
             except Exception:  # noqa: BLE001
                 logger.warning("Could not add welcome suggestions to the greeting", exc_info=True)
