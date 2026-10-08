@@ -74,15 +74,8 @@ async def shopify_app(request: Request) -> HTMLResponse:
         return _page(f'<h1>Pepa Assistant</h1><p class="bad">{html.escape(str(exc))}</p>', status=400)
     editor = (f"https://{shop}/admin/themes/current/editor?context=apps"
               f"&activateAppId={settings.SHOPIFY_CLIENT_ID}/pepa-assistant")
-    body = (
-        "<h1>Pepa Assistant</h1>"
-        f"<p>Connected to <b>{html.escape(shop)}</b>. Switch the assistant on in your theme once, "
-        "then set everything else here.</p>"
-        f'<a class="btn" href="{html.escape(editor)}" target="_top">Switch it on in the theme editor</a>'
-        '</div><div id="settings" class="card" style="margin-top:16px"><p class="muted">Loading settings…</p>'
-    )
-    body += _SETTINGS_APP.replace("__FIELDS__", json.dumps(widget_settings.FIELDS))
-    return _page(body, shop)
+    values = widget_settings.for_shop(installs.settings_for(shop))
+    return _settings_page(shop, editor, values)
 
 
 # ── Webhooks: uninstall, and the privacy requests every app must answer ─────
@@ -105,93 +98,124 @@ async def shopify_webhooks(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-# The settings form, drawn from widget_settings.FIELDS. Every call is signed
-# with a fresh session token from App Bridge (shopify.idToken()), so only the
-# shop's own admins can read or change its settings.
-_SETTINGS_APP = """
+# The settings page, in Polaris web components so it looks and behaves like
+# the rest of the Shopify admin (Settings template): one section per group,
+# Shopify's save bar on any change, Save in the admin title bar. It is drawn
+# here with the shop's saved values; saving goes to /shopify/app/settings,
+# signed with a fresh App Bridge session token.
+
+_GROUP_HELP = {
+    "Assistant": "What the assistant says about your shop.",
+    "Texts": "The words shoppers see in the chat.",
+    "Colours": "The main colours. The finer parts below follow these unless you set them.",
+    "Fonts and corners": "Typefaces and how rounded the chat looks.",
+    "Launcher": "The button that opens the chat.",
+    "Messages and chips": "The shopper's own messages and the suggestion chips. Leave a colour empty to follow the main colours.",
+    "Variant options": "Size and colour choices on products. Leave a colour empty to follow the main colours.",
+    "Product cards": "Product cards, the add to bag button and the message box.",
+    "Where it shows": "Pages and devices the assistant appears on.",
+    "Teaser message": "A short line beside the launcher to invite a first question.",
+    "Features": "Parts of the chat you can turn off.",
+    "Talk to our team": "Ways to reach a person, shown in the chat's sidebar.",
+}
+_GRID_GROUPS = {"Colours", "Fonts and corners", "Launcher", "Messages and chips", "Variant options", "Product cards"}
+_OPTION_LABELS = {"right": "Bottom right", "left": "Bottom left", "label": "Icon and text", "icon": "Icon only",
+                  "sparkle": "Sparkle", "chat": "Chat bubble", "bag": "Shopping bag", "search": "Search",
+                  "default": "Pepa's own"}
+
+
+def _attr(value) -> str:
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def _field(f: dict, value) -> str:
+    common = f'label="{_attr(f["label"])}" name="{_attr(f["id"])}"'
+    if f.get("info"):
+        common += f' details="{_attr(f["info"])}"'
+    kind = f["type"]
+    if kind == "checkbox":
+        return f'<s-switch {common}{" checked" if value else ""}></s-switch>'
+    if kind == "select":
+        options = "".join(f'<s-option value="{_attr(o)}"{" selected" if o == value else ""}>{html.escape(_OPTION_LABELS.get(o, o))}</s-option>'
+                          for o in f["options"])
+        return f'<s-select {common} value="{_attr(value)}">{options}</s-select>'
+    if kind == "range":
+        unit = f' suffix="{_attr(f.get("unit", ""))}"' if f.get("unit") else ""
+        return f'<s-number-field {common} value="{_attr(value)}" min="{f["min"]}" max="{f["max"]}" step="1"{unit}></s-number-field>'
+    if kind == "color":
+        empty = ' placeholder="Follows the main colours"' if f.get("optional") else ""
+        return f'<s-color-field {common} value="{_attr(value or "")}"{empty}></s-color-field>'
+    if kind == "textarea":
+        return f'<s-text-area {common} rows="4" value="{_attr(value)}"></s-text-area>'
+    if kind == "url":
+        return f'<s-url-field {common} value="{_attr(value)}"></s-url-field>'
+    return f'<s-text-field {common} value="{_attr(value)}"></s-text-field>'
+
+
+def _settings_page(shop: str, editor: str, values: dict) -> HTMLResponse:
+    groups: list[str] = list(dict.fromkeys(f["group"] for f in widget_settings.FIELDS))
+    sections = []
+    for group in groups:
+        fields = "".join(_field(f, values.get(f["id"])) for f in widget_settings.FIELDS if f["group"] == group)
+        layout = (f'<s-grid gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))" gap="base">{fields}</s-grid>'
+                  if group in _GRID_GROUPS else f'<s-stack gap="base">{fields}</s-stack>')
+        sections.append(f'<s-section heading="{_attr(group)}"><s-stack gap="base">'
+                        f'<s-paragraph color="subdued">{html.escape(_GROUP_HELP.get(group, ""))}</s-paragraph>'
+                        f'{layout}</s-stack></s-section>')
+    types = {f["id"]: f["type"] for f in widget_settings.FIELDS}
+    page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="shopify-api-key" content="{_attr(settings.SHOPIFY_CLIENT_ID)}">
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<script src="https://cdn.shopify.com/shopifycloud/polaris.js"></script>
+<title>Pepa Assistant</title>
+</head><body>
+<s-page heading="Pepa Assistant" inlineSize="base">
+  <s-button slot="primary-action" variant="primary" id="save-top">Save</s-button>
+  <s-stack gap="base">
+    <s-banner heading="Switch the assistant on in your theme" tone="info">
+      <s-stack gap="small-200">
+        <s-paragraph>Connected to {html.escape(shop)}. Turn on Pepa Assistant under App embeds once; everything else is set on this page.</s-paragraph>
+        <s-stack direction="inline"><s-button href="{_attr(editor)}" target="_top">Open the theme editor</s-button></s-stack>
+      </s-stack>
+    </s-banner>
+    <form id="settings" data-save-bar data-discard-confirmation>
+      <s-stack gap="base">{''.join(sections)}</s-stack>
+    </form>
+    <s-paragraph color="subdued">Changes show on your store the next time a page loads.</s-paragraph>
+  </s-stack>
+</s-page>
 <script>
-const FIELDS = __FIELDS__;
-const box = document.getElementById('settings');
-const token = () => (window.shopify && shopify.idToken ? shopify.idToken() : Promise.reject(new Error('Open the app from your Shopify admin.')));
-const call = async (method, body) => {
-  const res = await fetch('app/settings', { method, headers: { 'Authorization': 'Bearer ' + await token(), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
-  return res.json();
-};
-const LABELS = { right: 'Bottom right', left: 'Bottom left', label: 'Icon and text', icon: 'Icon only', sparkle: 'Sparkle', chat: 'Chat bubble', bag: 'Shopping bag', search: 'Search', default: "Pepa's own" };
-function input(f, value) {
-  const id = 'f_' + f.id;
-  let el;
-  if (f.type === 'textarea') { el = document.createElement('textarea'); el.rows = 4; el.value = value || ''; }
-  else if (f.type === 'select') { el = document.createElement('select'); f.options.forEach(o => { const op = new Option(LABELS[o] || o, o); el.add(op); }); el.value = value; }
-  else if (f.type === 'checkbox') { el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!value; }
-  else if (f.type === 'range') { el = document.createElement('input'); el.type = 'range'; el.min = f.min; el.max = f.max; el.value = value; }
-  else if (f.type === 'color') { el = document.createElement('input'); el.type = 'color'; el.value = value || '#000000'; if (f.optional && !value) el.dataset.empty = '1'; el.addEventListener('input', () => { delete el.dataset.empty; sync(); }); }
-  else { el = document.createElement('input'); el.type = f.type === 'url' ? 'url' : 'text'; el.value = value || ''; }
-  el.id = id; el.dataset.field = f.id;
-  const row = document.createElement('div'); row.className = 'row' + (f.type === 'checkbox' ? ' check' : '');
-  const lab = document.createElement('label'); lab.htmlFor = id; lab.textContent = f.label;
-  const out = document.createElement('span'); out.className = 'val';
-  const sync = () => { if (f.type === 'range') out.textContent = el.value + (f.unit || ''); if (f.type === 'color') { out.textContent = el.dataset.empty ? 'follows main colours' : el.value; clear && (clear.hidden = !!el.dataset.empty); } };
-  let clear = null;
-  if (f.type === 'color' && f.optional) { clear = document.createElement('button'); clear.type = 'button'; clear.className = 'link'; clear.textContent = 'Clear'; clear.addEventListener('click', () => { el.dataset.empty = '1'; sync(); }); }
-  el.addEventListener('input', sync);
-  if (f.type === 'checkbox') { row.append(el, lab); } else { row.append(lab); const line = document.createElement('div'); line.className = 'line'; line.append(el); if (f.type === 'range' || f.type === 'color') line.append(out); if (clear) line.append(clear); row.append(line); }
-  if (f.info) { const i = document.createElement('p'); i.className = 'muted'; i.textContent = f.info; row.append(i); }
-  sync();
-  return row;
-}
-function read() {
-  const v = {};
-  box.querySelectorAll('[data-field]').forEach(el => {
-    const f = FIELDS.find(x => x.id === el.dataset.field);
-    v[f.id] = f.type === 'checkbox' ? el.checked : f.type === 'range' ? Number(el.value) : (f.type === 'color' && el.dataset.empty) ? null : el.value;
-  });
-  return v;
-}
-(async () => {
-  try {
-    const { settings: values } = await call('GET');
-    box.innerHTML = '';
-    const groups = [...new Set(FIELDS.map(f => f.group))];
-    groups.forEach((g, n) => {
-      const d = document.createElement('details'); if (n < 2) d.open = true;
-      const sum = document.createElement('summary'); sum.textContent = g; d.append(sum);
-      FIELDS.filter(f => f.group === g).forEach(f => d.append(input(f, values[f.id])));
-      box.append(d);
-    });
-    const bar = document.createElement('div'); bar.className = 'bar';
-    const save = document.createElement('button'); save.className = 'btn'; save.textContent = 'Save';
-    const note = document.createElement('span'); note.className = 'muted';
-    save.addEventListener('click', async () => {
-      save.disabled = true; note.textContent = 'Saving…';
-      try { await call('POST', read()); note.textContent = 'Saved. Reload your store to see it.'; window.shopify && shopify.toast && shopify.toast.show('Settings saved'); }
-      catch (e) { note.textContent = 'Could not save: ' + e.message; }
-      save.disabled = false;
-    });
-    bar.append(save, note); box.append(bar);
-  } catch (e) { box.innerHTML = '<p class="bad"></p>'; box.firstChild.textContent = 'Could not load the settings: ' + e.message; }
-})();
+const TYPES = {json.dumps(types)};
+const form = document.getElementById('settings');
+document.getElementById('save-top').addEventListener('click', () => form.requestSubmit());
+function read() {{
+  const values = {{}};
+  form.querySelectorAll('[name]').forEach((el) => {{
+    const kind = TYPES[el.getAttribute('name')];
+    if (!kind) return;
+    if (kind === 'checkbox') values[el.getAttribute('name')] = !!el.checked;
+    else if (kind === 'range') values[el.getAttribute('name')] = Number(el.value);
+    else if (kind === 'color') values[el.getAttribute('name')] = el.value ? String(el.value).slice(0, 7) : null;
+    else values[el.getAttribute('name')] = el.value || '';
+  }});
+  return values;
+}}
+form.addEventListener('submit', async (event) => {{
+  event.preventDefault();
+  try {{
+    const token = await shopify.idToken();
+    const res = await fetch('app/settings', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify(read()) }});
+    if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
+    shopify.toast.show('Settings saved');
+  }} catch (error) {{
+    shopify.toast.show('Could not save: ' + error.message, {{ isError: true }});
+  }}
+}});
 </script>
-<style>
-  details { border-top: 1px solid #ebebeb; padding: 10px 0; }
-  details:first-of-type { border-top: 0; }
-  summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
-  .row { margin: 12px 0; }
-  .row label { display: block; font-weight: 500; margin-bottom: 4px; }
-  .row.check { display: flex; align-items: center; gap: 8px; }
-  .row.check label { margin: 0; font-weight: 400; }
-  .line { display: flex; align-items: center; gap: 10px; }
-  input[type=text], input[type=url], textarea, select { width: 100%; box-sizing: border-box; padding: 7px 10px; border: 1px solid #c9c9c9; border-radius: 8px; font: inherit; }
-  input[type=range] { flex: 1; }
-  input[type=color] { width: 44px; height: 32px; padding: 0; border: 1px solid #c9c9c9; border-radius: 6px; background: none; }
-  .val { font-size: 13px; color: #616161; min-width: 60px; }
-  .link { border: 0; background: none; color: #005bd3; cursor: pointer; padding: 0; font: inherit; }
-  .bar { position: sticky; bottom: 0; background: #fff; padding: 12px 0 4px; display: flex; align-items: center; gap: 12px; border-top: 1px solid #ebebeb; margin-top: 8px; }
-  button.btn { border: 0; cursor: pointer; font: inherit; }
-  button.btn[disabled] { opacity: .5; }
-</style>
-"""
+</body></html>"""
+    return HTMLResponse(page, headers={"Content-Security-Policy": f"frame-ancestors https://admin.shopify.com https://{shop};"})
 
 
 def _shop_from_bearer(request: Request) -> str:
