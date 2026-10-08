@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
 import time
 from datetime import datetime
 
@@ -75,6 +76,57 @@ def token_for(domain: str) -> str | None:
 
 def settings_for(domain: str) -> dict:
     return (_installed.get(shops.normalise(domain)) or {}).get("settings") or {}
+
+
+# ── The sign-in secret, made by the app ────────────────────────────────────
+# The theme signs a signed-in customer with Liquid's hmac_sha256 so the backend
+# can trust who they are. The secret is made here, per shop, and written as an
+# app-owned metafield on the shop: the app embed reads it server-side
+# (app.metafields.pepa.signing_secret) and it never reaches the browser.
+SIGNING_KEY = "_signing_secret"
+_SET_SECRET = """
+mutation SetSigningSecret($metafields: [MetafieldsSetInput!]!) {
+  metafieldsSet(metafields: $metafields) { userErrors { field message } }
+}
+"""
+
+
+def signing_secret_for(domain: str) -> str | None:
+    return settings_for(domain).get(SIGNING_KEY)
+
+
+async def ensure_signing_secret(shop: str) -> None:
+    """Make and publish the shop's sign-in secret once. Best effort: a failure
+    leaves "Welcome back" off for that shop until the app is opened again."""
+    shop = shops.normalise(shop)
+    if signing_secret_for(shop):
+        return
+    from app.services.shopify_client import ShopifyError, graphql
+    secret = secrets.token_urlsafe(32)
+    reset = shops.set_current(shop)
+    try:
+        owner = (await graphql("{ currentAppInstallation { id } }"))["currentAppInstallation"]["id"]
+        result = await graphql(_SET_SECRET, {"metafields": [{
+            "ownerId": owner, "namespace": "pepa", "key": "signing_secret",
+            "type": "single_line_text_field", "value": secret}]})
+        errors = result["metafieldsSet"]["userErrors"]
+        if errors:
+            raise ShopifyError("; ".join(e["message"] for e in errors))
+    except (ShopifyError, KeyError, TypeError) as exc:
+        logger.warning("Could not publish %s's sign-in secret: %s", shop, exc)
+        return
+    finally:
+        shops._current.reset(reset)
+    async with AsyncSessionLocal() as db:
+        row = await db.get(Shop, shop)
+        if row is None:
+            row = Shop(domain=shop)
+            db.add(row)
+        row.settings = {**(row.settings or {}), SIGNING_KEY: secret}
+        await db.commit()
+        kept = row.settings
+    _installed.setdefault(shop, {"token": None, "scopes": "", "settings": {}})["settings"] = kept
+    logger.info("Published the sign-in secret for %s", shop)
 
 
 async def load() -> None:
@@ -179,6 +231,7 @@ async def install(id_token: str) -> str:
     if not token_for(shop):
         token, scopes = await exchange(shop, id_token)
         await save(shop, token, scopes)
+    await ensure_signing_secret(shop)
     return shop
 
 

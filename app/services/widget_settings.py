@@ -46,6 +46,8 @@ FIELDS: list[dict] = [
     _f("shopper_note", "text", "Sidebar note", "Texts", "Sizes, occasions and budgets, understood in your own words."),
     _f("legal", "text", "Small print under the input", "Texts",
        "Pepa Assistant can make mistakes - please check sizes and delivery dates."),
+    _f("nav_links", "textarea", "Top bar links", "Texts", "",
+       info="Links across the top of the chat, one per line as Title | link, e.g. New in | /collections/new-in. Up to 6."),
 
     # Colours
     _f("accent", "color", "Accent", "Colours", "#6f2c2c", info="Prices, highlights and totals."),

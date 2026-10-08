@@ -73,17 +73,21 @@ def signature_valid(customer, now: float | None = None) -> bool:
     hmac_sha256 filter and the shared secret. Any edit to the id or email, a
     stale timestamp, or no secret configured at all, and this is False.
     """
-    secret = settings.SUPPORT_CUSTOMER_SIGNING_SECRET
+    # The shop's own secret, made by the app at install (see installs), or the
+    # one set on the backend for a theme that still signs with that.
+    from app.services import installs, shops
+    secrets_ = [s for s in (installs.signing_secret_for(shops.current()), settings.SUPPORT_CUSTOMER_SIGNING_SECRET) if s]
     signature = getattr(customer, "signature", None)
     signed_at = getattr(customer, "signed_at", None)
-    if not (secret and signature and signed_at and customer.id and customer.email):
+    if not (secrets_ and signature and signed_at and customer.id and customer.email):
         return False
     age = (now or time.time()) - int(signed_at)
     if age < -300 or age > settings.SUPPORT_CUSTOMER_SIGNATURE_MAX_AGE_HOURS * 3600:
         return False
     message = f"{customer.id}:{customer.email.strip().lower()}:{int(signed_at)}"
-    expected = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature.strip().lower())
+    given = signature.strip().lower()
+    return any(hmac.compare_digest(hmac.new(s.encode(), message.encode(), hashlib.sha256).hexdigest(), given)
+               for s in secrets_)
 
 
 def set_current(shopper: Shopper | None):
