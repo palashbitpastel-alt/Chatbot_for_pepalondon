@@ -10,6 +10,7 @@ admin agent and read internal business data.
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -736,6 +737,13 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             briefing = f"{briefing}\nMulti-item offer on their bag: {line}"
 
     async def events() -> AsyncIterator[str]:
+        # Where the seconds go: milliseconds since the request, per step, sent
+        # in `done` as "timing" so a slow reply can be read off the live bot.
+        started = time.monotonic()
+        timing: dict = {}
+
+        def mark(step: str) -> None:
+            timing.setdefault(step, round((time.monotonic() - started) * 1000))
         # Every price in this stream - the welcome tiles as much as the agent's
         # cards - is the one the shopper's own storefront is quoting.
         market.set_country(req.context.country if req.context else None)
@@ -783,6 +791,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                 understood, req.context.currency if req.context else None))
             if understood["fields"]:
                 yield _sse("understood", understood)
+            mark("understood")
 
         # The widget sends the cart without imagery, so hand it straight back with
         # pictures and links. Sent before the reply so the panel can draw at once.
@@ -918,12 +927,17 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             except (ShopifyError, KeyError, ValueError):
                 logger.warning("Could not list categories for the briefing", exc_info=True)
             asking = with_context(req.message, turn_briefing)
+            mark("briefing")
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any
             # tool is never re-run: it may have put something in their bag.
             for attempt in range(2):
                 used_tools = False
                 async for event in CUSTOMER_SUPPORT_AGENT.stream(asking, history):
+                    if event["type"] == "tool":
+                        mark(f"tool_{event['phase']}:{event['name']}")
+                    elif event["type"] == "token":
+                        mark("first_token")
                     if event["type"] == "token":
                         yield _sse("token", {"text": event["text"]})
                     elif event["type"] == "reset":
@@ -936,6 +950,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
                             # Collected now, sent once the reply exists - see finalise().
                             cards.take(event["name"], event.get("output"))
                     elif event["type"] == "final":
+                        mark(f"agent_done_{attempt}")
                         reply, declared = split_show(_without_cards_note(event["reply"]))
                 if attempt or used_tools or not await _named_without_looking(
                         reply, req.cart, req.context.cards_on_screen if req.context else None):
@@ -1056,7 +1071,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         if chips:
             yield _sse("suggestions", {"suggestions": chips})
 
-        done_payload = {"session_id": session_id, "reply": reply, **drawn}
+        mark("end")
+        logger.info("Session %s timing %s", session_id, timing)
+        done_payload = {"session_id": session_id, "reply": reply, **drawn, "timing": timing}
         if chips:
             done_payload["suggestions"] = chips
         if cart_payload:
