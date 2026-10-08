@@ -908,7 +908,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # Who it is for is unclear or contradictory: ask, never guess.
             if (turn_understood or {}).get("unsure") == "for":
                 ask_who = ("[Who this is for is unclear or contradictory in what they wrote. Ask one "
-                           "short question - is it for a boy or a girl? - before showing any products.]")
+                           "short question - is it for a boy or a girl? - before showing any products, "
+                           "unless they are changing a look already on their screen: then keep building it.]")
                 turn_briefing = f"{turn_briefing}\n{ask_who}" if turn_briefing else ask_who
             if n := (turn_understood or {}).get("count"):
                 ask = f"[They asked for exactly {n} item(s): choose and name exactly {n}, no more]"

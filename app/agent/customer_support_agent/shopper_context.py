@@ -157,7 +157,7 @@ def describe(
                      "that wish, never answer with loose pieces. A question about one piece - its colour, its size - is about that "
                      "piece alone: answer it on its own card and never fold it into this look unless they "
                      "ask. When they do mean the look: the pieces and options are kept unless they change "
-                     "them. Ticks are their choice - adding "
+                     "them. The options shown on each piece are ones the shop sells for it. Ticks are their choice - adding "
                      "\"them\" means the ticked rows only; an unticked row is one they took out, so "
                      "never add it unless they ask for it again:")
         for item in context.on_screen:
