@@ -19,6 +19,7 @@ import httpx
 
 from app.core.config import settings
 from app.services.shopify_client import ShopifyError, graphql, store_domain
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,8 @@ mutation MakeToken($input: StorefrontAccessTokenInput!) {
 }
 """
 
-_token: str | None = None
-_failed_at = 0.0
+_token_BY_SHOP: dict = {}  # per shop: see services/shops
+_failed_at_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 async def _kept(value: str | None = None) -> str | None:
@@ -56,11 +57,11 @@ async def _kept(value: str | None = None) -> str | None:
         from app.db.session import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == TOKEN_KEY))).scalar_one_or_none()
+            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == shops.key(TOKEN_KEY)))).scalar_one_or_none()
             if value is None:
                 return (row.value or {}).get("token") if row and isinstance(row.value, dict) else None
             if row is None:
-                db.add(StoreSetting(key=TOKEN_KEY, value={"token": value}))
+                db.add(StoreSetting(key=shops.key(TOKEN_KEY), value={"token": value}))
             else:
                 row.value = {"token": value}
             await db.commit()
@@ -70,33 +71,31 @@ async def _kept(value: str | None = None) -> str | None:
 
 
 async def _storefront_token() -> str | None:
-    global _token, _failed_at
     if settings.SHOPIFY_STOREFRONT_TOKEN:
         return settings.SHOPIFY_STOREFRONT_TOKEN
-    if _token:
-        return _token
-    if time.monotonic() - _failed_at < RETRY_SECONDS and _failed_at:
+    if _token_BY_SHOP.get(shops.current(), None):
+        return _token_BY_SHOP.get(shops.current(), None)
+    if time.monotonic() - _failed_at_BY_SHOP.get(shops.current(), 0.0) < RETRY_SECONDS and _failed_at_BY_SHOP.get(shops.current(), 0.0):
         return None
-    _token = await _kept()
-    if _token:
-        return _token
+    _token_BY_SHOP[shops.current()] = await _kept()
+    if _token_BY_SHOP.get(shops.current(), None):
+        return _token_BY_SHOP.get(shops.current(), None)
     try:
         made = (await graphql(CREATE_TOKEN, {"input": {"title": "Pepa Assistant search"}}))["storefrontAccessTokenCreate"]
         token = (made.get("storefrontAccessToken") or {}).get("accessToken")
         if not token:
             raise ShopifyError("; ".join(e.get("message", "") for e in made.get("userErrors") or []) or "no token")
     except (ShopifyError, KeyError, TypeError) as exc:
-        _failed_at = time.monotonic()
+        _failed_at_BY_SHOP[shops.current()] = time.monotonic()
         logger.warning("Storefront search is off - no Storefront API token: %s", exc)
         return None
-    _token = await _kept(token)
-    return _token
+    _token_BY_SHOP[shops.current()] = await _kept(token)
+    return _token_BY_SHOP.get(shops.current(), None)
 
 
 async def product_ids(query: str, first: int) -> list[str] | None:
     """Product ids for a search, most relevant first. None when the storefront
     search cannot be used, so the caller falls back to the Admin search."""
-    global _token
     token = await _storefront_token()
     if not token or not query.strip():
         return None
@@ -106,7 +105,7 @@ async def product_ids(query: str, first: int) -> list[str] | None:
             response = await c.post(url, json={"query": SEARCH, "variables": {"q": query, "first": first}},
                                     headers={"X-Shopify-Storefront-Access-Token": token}, timeout=20.0)
         if response.status_code in (401, 403) and not settings.SHOPIFY_STOREFRONT_TOKEN:
-            _token = None                      # revoked: make a new one next time
+            _token_BY_SHOP[shops.current()] = None                      # revoked: make a new one next time
             await _kept("")
         response.raise_for_status()
         body = response.json()

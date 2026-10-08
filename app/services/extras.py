@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from app.services import compare
 from app.services.shopify_client import ShopifyError, graphql
 from app.services.shopify_storefront import collection_tree, shop_info
+from app.services import shops
 
 # ── Product questions ─────────────────────────────────────────────────────
 
@@ -282,7 +283,7 @@ query SupportShipping {
 _WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 _DAYS_RE = re.compile(r"(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*(?:business\s+|working\s+)?days?"
                       r"|(\d{1,2})\s*(?:business\s+|working\s+)?days?", re.I)
-_shipping_cache: tuple[float, dict] | None = None
+_shipping_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 SHIPPING_CACHE_SECONDS = 600
 
 
@@ -299,9 +300,8 @@ def _transit(text: str) -> tuple[int, int] | None:
 
 
 async def _shipping() -> dict:
-    global _shipping_cache
-    if _shipping_cache and time.monotonic() - _shipping_cache[0] < SHIPPING_CACHE_SECONDS:
-        return _shipping_cache[1]
+    if _shipping_cache_BY_SHOP.get(shops.current(), None) and time.monotonic() - _shipping_cache_BY_SHOP.get(shops.current(), None)[0] < SHIPPING_CACHE_SECONDS:
+        return _shipping_cache_BY_SHOP.get(shops.current(), None)[1]
     data = await graphql(SHIPPING)
     methods = []
     for profile in data["deliveryProfiles"]["nodes"]:
@@ -333,7 +333,7 @@ async def _shipping() -> dict:
         "home_country": (shop.get("billingAddress") or {}).get("countryCodeV2"),
         "methods": methods,
     }
-    _shipping_cache = (time.monotonic(), result)
+    _shipping_cache_BY_SHOP[shops.current()] = (time.monotonic(), result)
     return result
 
 

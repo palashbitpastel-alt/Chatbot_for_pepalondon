@@ -31,16 +31,17 @@ def is_configured() -> bool:
 
 
 def store_domain() -> str:
-    """The bare myshopify host, e.g. "palashstor.myshopify.com"."""
-    return settings.SHOPIFY_STORE_URL.removeprefix("https://").removeprefix("http://").strip("/")
+    """The bare myshopify host of the shop this request is for."""
+    from app.services import shops
+    return shops.current()
 
 
 def graphql_url() -> str:
     return f"https://{store_domain()}/admin/api/{settings.SHOPIFY_API_VERSION}/graphql.json"
 
 
-_token: str | None = None
-_token_expires_at = 0.0
+# One token per shop: {shop: (token, expires_at)}.
+_tokens: dict[str, tuple[str, float]] = {}
 _token_lock = asyncio.Lock()
 
 
@@ -51,12 +52,15 @@ async def access_token(force_refresh: bool = False) -> str:
     the client credentials grant, which Dev Dashboard apps use and which only
     lives 24 hours, so it is fetched on demand and renewed an hour early.
     """
-    global _token, _token_expires_at
-    if settings.SHOPIFY_ACCESS_TOKEN:
+    from app.services import shops
+    shop = store_domain()
+    # A fixed token belongs to the default shop only.
+    if settings.SHOPIFY_ACCESS_TOKEN and shops.is_default():
         return settings.SHOPIFY_ACCESS_TOKEN
     async with _token_lock:
-        if _token and not force_refresh and time.monotonic() < _token_expires_at:
-            return _token
+        held = _tokens.get(shop)
+        if held and not force_refresh and time.monotonic() < held[1]:
+            return held[0]
         try:
             async with httpx.AsyncClient() as c:
                 response = await c.post(
@@ -72,12 +76,12 @@ async def access_token(force_refresh: bool = False) -> str:
                 body = response.json()
         except httpx.HTTPError as exc:
             raise ShopifyError(f"Could not get a Shopify access token: {exc}") from exc
-        _token = body["access_token"]
-        _token_expires_at = time.monotonic() + max(int(body.get("expires_in", 86399)) - 3600, 60)
-        return _token
+        expires = time.monotonic() + max(int(body.get("expires_in", 86399)) - 3600, 60)
+        _tokens[shop] = (body["access_token"], expires)
+        return body["access_token"]
 
 
-_scopes: set[str] | None = None
+_scopes: dict[str, set[str]] = {}
 
 
 async def granted_scopes() -> set[str]:
@@ -86,11 +90,11 @@ async def granted_scopes() -> set[str]:
     Cached for the process: they change only when the app is reinstalled, and
     every write path asks before it starts.
     """
-    global _scopes
-    if _scopes is None:
+    shop = store_domain()
+    if shop not in _scopes:
         data = await graphql("{ currentAppInstallation { accessScopes { handle } } }")
-        _scopes = {s["handle"] for s in data["currentAppInstallation"]["accessScopes"]}
-    return _scopes
+        _scopes[shop] = {s["handle"] for s in data["currentAppInstallation"]["accessScopes"]}
+    return _scopes[shop]
 
 
 async def can(scope: str) -> bool:
@@ -126,7 +130,8 @@ async def graphql(query: str, variables: dict | None = None, client: httpx.Async
             )
 
         response = await send(await access_token())
-        if response.status_code == 401 and not settings.SHOPIFY_ACCESS_TOKEN:
+        from app.services import shops
+        if response.status_code == 401 and not (settings.SHOPIFY_ACCESS_TOKEN and shops.is_default()):
             # Revoked or rotated early: fetch a fresh one and try once more.
             response = await send(await access_token(force_refresh=True))
         response.raise_for_status()

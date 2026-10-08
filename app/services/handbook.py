@@ -165,6 +165,9 @@ async def search(db: AsyncSession, question: str, limit: int = 4, audience: str 
     agent: it keeps admin URLs, API scopes and the bot's own security rules out
     of a conversation with a customer.
     """
+    from app.services import shops
+    if not shops.is_default():
+        return []  # the handbook file is the default shop's; others have none yet
     hits = await rag.search(db, question, kinds=[HANDBOOK_KIND], limit=limit * 3)
     out: list[dict] = []
     for hit in hits:

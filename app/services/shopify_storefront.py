@@ -21,6 +21,7 @@ from urllib.parse import quote
 from app.core.config import settings
 from app.services import audience, shopify_search
 from app.services.shopify_client import ShopifyError, graphql, store_domain
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -261,21 +262,20 @@ query SupportShopInfo {
 }
 """
 
-_shop_cache: dict | None = None
+_shop_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 async def shop_info() -> dict:
     """Store name, currency and contact address. Cached — it does not change."""
-    global _shop_cache
-    if _shop_cache is None:
+    if _shop_cache_BY_SHOP.get(shops.current(), None) is None:
         shop = (await graphql(SHOP_INFO))["shop"]
-        _shop_cache = {
+        _shop_cache_BY_SHOP[shops.current()] = {
             "name": shop["name"],
             "currency": shop["currencyCode"],
             "contact_email": shop.get("contactEmail"),
             "url": shop.get("url"),
         }
-    return _shop_cache
+    return _shop_cache_BY_SHOP.get(shops.current(), None)
 
 
 def sellable(extra: str = "") -> str:
@@ -285,8 +285,11 @@ def sellable(extra: str = "") -> str:
     stocks more than this assistant's range.
     """
     parts = ["status:ACTIVE"]
-    if settings.SUPPORT_CATALOGUE_FILTER.strip():
-        parts.append(f"({settings.SUPPORT_CATALOGUE_FILTER.strip()})")
+    # The default shop's filter, or the "catalogue_filter" in another shop's
+    # SUPPORT_SHOP_SETTINGS - never one shop's filter on another's catalogue.
+    narrowed = shops.setting("catalogue_filter", settings.SUPPORT_CATALOGUE_FILTER).strip()
+    if narrowed:
+        parts.append(f"({narrowed})")
     if extra:
         parts.insert(0, extra if extra.startswith("(") else f"({extra})")
     return " AND ".join(parts)
@@ -527,7 +530,7 @@ def _fresh(stamped: tuple | None, minutes: int) -> bool:
 
 # One entry: the whole grouping. `limit` only slices it, so asking for five
 # categories must not send the scan round again.
-_categories_cache: tuple[float, list[dict]] | None = None
+_categories_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 
 CATEGORY_SCAN_PAGE = 250   # products per page while grouping
 CATEGORY_SCAN_PAGES = 8    # ...so at most 2000 products are looked at
@@ -567,9 +570,8 @@ async def categories(limit: int = CATEGORY_LIMIT) -> dict:
 
 async def _grouped_categories() -> list[dict]:
     """Every category, best first. Cached whole; callers take the slice they need."""
-    global _categories_cache
-    if _fresh(_categories_cache, settings.SUPPORT_CATEGORY_CACHE_MINUTES):
-        return _categories_cache[1]
+    if _fresh(_categories_cache_BY_SHOP.get(shops.current(), None), settings.SUPPORT_CATEGORY_CACHE_MINUTES):
+        return _categories_cache_BY_SHOP.get(shops.current(), None)[1]
 
     groups: dict[str, dict] = {}
     cursor: str | None = None
@@ -637,13 +639,13 @@ async def _grouped_categories() -> list[dict]:
             }
         )
 
-    _categories_cache = (time.monotonic(), out)
+    _categories_cache_BY_SHOP[shops.current()] = (time.monotonic(), out)
     return out
 
 
 # ── Collections ────────────────────────────────────────────────────────────
 
-_collections_cache: dict[tuple[int, tuple[str, ...]], tuple[float, dict]] = {}
+_collections_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 
 COLLECTION_SCAN = 250      # how many collections to look at before ranking them
 COLLECTION_LIMIT = 100     # most a caller may ask for
@@ -693,8 +695,8 @@ async def collections(limit: int = 8, handles: list[str] | None = None) -> dict:
     wanted = tuple(h.strip() for h in (handles or []) if h and h.strip())
 
     key = (limit, wanted)
-    if _fresh(_collections_cache.get(key), settings.SUPPORT_WELCOME_CACHE_MINUTES):
-        return _collections_cache[key][1]
+    if _fresh(shops.scoped(_collections_cache_BY_SHOP, dict).get(key), settings.SUPPORT_WELCOME_CACHE_MINUTES):
+        return shops.scoped(_collections_cache_BY_SHOP, dict)[key][1]
 
     query = (" OR ".join(f"handle:{h}" for h in wanted) if wanted
              else "published_status:published")
@@ -713,7 +715,7 @@ async def collections(limit: int = 8, handles: list[str] | None = None) -> dict:
         chosen = sorted(found, key=lambda c: c["name"].casefold())[:limit]
 
     result = {"count": len(chosen), "total": len(found), "collections": chosen}
-    _collections_cache[key] = (time.monotonic(), result)
+    shops.scoped(_collections_cache_BY_SHOP, dict)[key] = (time.monotonic(), result)
     return result
 
 
@@ -743,7 +745,7 @@ query SupportProductCollections($cursor: String, $query: String!) {
 
 TREE_SCAN_PAGES = 10        # 30 products a page, so up to 300 products
 
-_tree_cache: tuple[float, dict] | None = None
+_tree_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 def _same_shelf(name: str) -> str:
@@ -788,9 +790,8 @@ async def collection_tree() -> dict:
       ids, titles      lowercased title -> product id, and back to the real title,
                        for resolving a product a shopper names loosely
     """
-    global _tree_cache
-    if _fresh(_tree_cache, settings.SUPPORT_WELCOME_CACHE_MINUTES):
-        return _tree_cache[1]
+    if _fresh(_tree_cache_BY_SHOP.get(shops.current(), None), settings.SUPPORT_WELCOME_CACHE_MINUTES):
+        return _tree_cache_BY_SHOP.get(shops.current(), None)[1]
 
     published = {c["handle"]: c for c in (await collections(COLLECTION_LIMIT))["collections"]}
     type_of: dict[str, str] = {}
@@ -856,7 +857,7 @@ async def collection_tree() -> dict:
     tree = {"type_of": type_of, "ids": ids, "titles": titles, "handles": handles,
             "home": home, "parent": parent, "children": children,
             "collection_type": collection_type, "cards": published}
-    _tree_cache = (time.monotonic(), tree)
+    _tree_cache_BY_SHOP[shops.current()] = (time.monotonic(), tree)
     return tree
 
 
@@ -866,8 +867,8 @@ async def collection_tree() -> dict:
 # the agent can make, so the answer is cached for everyone rather than recomputed
 # per shopper.
 
-_best_sellers_cache: dict[tuple[int, int], tuple[float, dict]] = {}
-_order_tally_cache: dict[int, tuple[float, tuple[dict, dict, int]]] = {}
+_best_sellers_cache_BY_SHOP: dict = {}  # per shop: see services/shops
+_order_tally_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 def _order_scan_window(days: int) -> str:
@@ -935,16 +936,16 @@ async def best_sellers(limit: int = 5, days: int | None = None) -> dict:
     days = settings.SUPPORT_BEST_SELLER_DAYS if days is None else max(1, days)
 
     key = (limit, days)
-    if _fresh(_best_sellers_cache.get(key), settings.SUPPORT_BEST_SELLER_CACHE_MINUTES):
-        return _best_sellers_cache[key][1]
+    if _fresh(shops.scoped(_best_sellers_cache_BY_SHOP, dict).get(key), settings.SUPPORT_BEST_SELLER_CACHE_MINUTES):
+        return shops.scoped(_best_sellers_cache_BY_SHOP, dict)[key][1]
 
     # The order scan does not depend on how many products were asked for, so it
     # is cached per window and shared by every limit.
-    if _fresh(_order_tally_cache.get(days), settings.SUPPORT_BEST_SELLER_CACHE_MINUTES):
-        units, appearances, scanned = _order_tally_cache[days][1]
+    if _fresh(shops.scoped(_order_tally_cache_BY_SHOP, dict).get(days), settings.SUPPORT_BEST_SELLER_CACHE_MINUTES):
+        units, appearances, scanned = shops.scoped(_order_tally_cache_BY_SHOP, dict)[days][1]
     else:
         units, appearances, scanned = await _count_units_sold(days)
-        _order_tally_cache[days] = (time.monotonic(), (units, appearances, scanned))
+        shops.scoped(_order_tally_cache_BY_SHOP, dict)[days] = (time.monotonic(), (units, appearances, scanned))
     currency = (await shop_info())["currency"]
 
     if not units:
@@ -957,7 +958,7 @@ async def best_sellers(limit: int = 5, days: int | None = None) -> dict:
             "count": 0,
             "products": [],
         }
-        _best_sellers_cache[key] = (time.monotonic(), result)
+        shops.scoped(_best_sellers_cache_BY_SHOP, dict)[key] = (time.monotonic(), result)
         return result
 
     # Most units first; a tie goes to the product that appeared in more orders,
@@ -983,7 +984,7 @@ async def best_sellers(limit: int = 5, days: int | None = None) -> dict:
         "count": len(products),
         "products": products,
     }
-    _best_sellers_cache[key] = (time.monotonic(), result)
+    shops.scoped(_best_sellers_cache_BY_SHOP, dict)[key] = (time.monotonic(), result)
     return result
 
 

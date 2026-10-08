@@ -106,8 +106,9 @@ def _example(n: int, meta: dict) -> str:
 async def recall(db: AsyncSession, previous_reply: str | None, message: str,
                  understood: dict | None = None) -> str:
     """The owner's reviewed examples closest to this moment, as a briefing note."""
-    if not enabled.get():
-        return ""
+    from app.services import shops
+    if not enabled.get() or not shops.is_default():
+        return ""  # reviewed on the default shop's answers; other shops have none yet
     try:
         hits = await rag.search(db, moment(previous_reply, message, understood), kinds=[KIND],
                                 limit=RECALL_LIMIT, min_score=MIN_SCORE)

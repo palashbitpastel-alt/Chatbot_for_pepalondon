@@ -16,6 +16,7 @@ import time
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.services.shopify_client import ShopifyError, graphql
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +40,14 @@ query MultiItemTiers {
 }
 """
 
-_cache: tuple[float, list[dict]] | None = None
+_cache_BY_SHOP: dict = {}  # per shop: see services/shops
 # Why there are no tiers, for the store owner: "ok", "none_set_up" or the reason
 # the discounts could not be read (usually the app lacks read_discounts).
-_status = "not_read"
+_status_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 def status() -> str:
-    return _status
+    return _status_BY_SHOP.get(shops.current(), "not_read")
 
 
 def _parse(nodes: list[dict]) -> list[dict]:
@@ -70,18 +71,17 @@ def _parse(nodes: list[dict]) -> list[dict]:
 async def tiers() -> list[dict]:
     """The store's multi-item tiers, smallest first. [] when none are set up or
     the store cannot be read - the chat then simply shows no offer."""
-    global _cache, _status
-    if _cache and time.monotonic() - _cache[0] < TIER_CACHE_SECONDS:
-        return _cache[1]
+    if _cache_BY_SHOP.get(shops.current(), None) and time.monotonic() - _cache_BY_SHOP.get(shops.current(), None)[0] < TIER_CACHE_SECONDS:
+        return _cache_BY_SHOP.get(shops.current(), None)[1]
     try:
         data = await graphql(TIERS_QUERY)
         ladder = _parse(data["automaticDiscountNodes"]["nodes"])
-        _status = "ok" if ladder else "none_set_up"
+        _status_BY_SHOP[shops.current()] = "ok" if ladder else "none_set_up"
     except (ShopifyError, KeyError) as exc:
         logger.warning("Could not read the store's automatic discounts: %s", exc)
-        _status = f"cannot_read: {str(exc)[:200]}"
-        ladder = _cache[1] if _cache else []
-    _cache = (time.monotonic(), ladder)
+        _status_BY_SHOP[shops.current()] = f"cannot_read: {str(exc)[:200]}"
+        ladder = _cache_BY_SHOP.get(shops.current(), None)[1] if _cache_BY_SHOP.get(shops.current(), None) else []
+    _cache_BY_SHOP[shops.current()] = (time.monotonic(), ladder)
     return ladder
 
 

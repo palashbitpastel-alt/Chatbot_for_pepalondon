@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import re
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ _ASK = (
     'Answer with JSON only: {{"<handle>": {{"occasions": [...], "seasons": [...], "about": "..."}}, ...}}'
 )
 
-_known: dict[str, dict] = {}
+_known_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 def _stated_seasons(product: dict) -> list[str]:
@@ -109,15 +110,14 @@ def _fingerprint(product: dict) -> str:
     return hashlib.sha1(_source(product).encode("utf-8")).hexdigest()[:12]
 
 
-_loaded = False
+_loaded_BY_SHOP: dict = {}  # per shop: see services/shops
 
 
 async def _load() -> None:
     """The readings kept from earlier runs, once per process."""
-    global _loaded
-    if _loaded:
+    if _loaded_BY_SHOP.get(shops.current(), False):
         return
-    _loaded = True
+    _loaded_BY_SHOP[shops.current()] = True
     try:
         from sqlalchemy import select
 
@@ -125,9 +125,9 @@ async def _load() -> None:
         from app.db.session import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == READINGS_KEY))).scalar_one_or_none()
+            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == shops.key(READINGS_KEY)))).scalar_one_or_none()
         if row and isinstance(row.value, dict):
-            _known.update({h: r for h, r in row.value.items() if isinstance(r, dict)})
+            shops.scoped(_known_BY_SHOP, dict).update({h: r for h, r in row.value.items() if isinstance(r, dict)})
     except Exception:  # noqa: BLE001 - the readings are a saving, never a requirement
         logger.warning("Could not load the kept product readings", exc_info=True)
 
@@ -140,11 +140,11 @@ async def _save() -> None:
         from app.db.session import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == READINGS_KEY))).scalar_one_or_none()
+            row = (await db.execute(select(StoreSetting).where(StoreSetting.key == shops.key(READINGS_KEY)))).scalar_one_or_none()
             if row is None:
-                db.add(StoreSetting(key=READINGS_KEY, value=dict(_known)))
+                db.add(StoreSetting(key=shops.key(READINGS_KEY), value=dict(shops.scoped(_known_BY_SHOP, dict))))
             else:
-                row.value = dict(_known)
+                row.value = dict(shops.scoped(_known_BY_SHOP, dict))
             await db.commit()
     except Exception:  # noqa: BLE001
         logger.warning("Could not keep the product readings", exc_info=True)
@@ -156,9 +156,9 @@ async def learn(products: list[dict]) -> dict[str, dict]:
     again next time rather than remembered as suiting nothing."""
     await _load()
     unread = [p for p in products if p.get("handle")
-              and (_known.get(p["handle"]) or {}).get("from") != _fingerprint(p)]
+              and (shops.scoped(_known_BY_SHOP, dict).get(p["handle"]) or {}).get("from") != _fingerprint(p)]
     if not unread:
-        return _known
+        return shops.scoped(_known_BY_SHOP, dict)
     from app.agent.base import build_llm
 
     model = build_llm(temperature=0, max_tokens=2500)
@@ -186,7 +186,7 @@ async def learn(products: list[dict]) -> dict[str, dict]:
             found = read.get(piece["handle"])
             if not isinstance(found, dict):
                 continue
-            _known[piece["handle"]] = {
+            shops.scoped(_known_BY_SHOP, dict)[piece["handle"]] = {
                 "occasions": [o for o in (found.get("occasions") or []) if o in OCCASIONS],
                 "seasons": [s for s in (found.get("seasons") or []) if s in SEASONS],
                 "about": str(found.get("about") or "").strip()[:200] or None,
@@ -199,7 +199,7 @@ async def learn(products: list[dict]) -> dict[str, dict]:
     learned = any(done)
     if learned:
         await _save()
-    return _known
+    return shops.scoped(_known_BY_SHOP, dict)
 
 
 def for_season(product: dict, season: str | None) -> bool | None:
@@ -215,18 +215,18 @@ def for_season(product: dict, season: str | None) -> bool | None:
 
 def about_of(product: dict) -> str | None:
     """One line of what the piece is, read off everything the shop wrote."""
-    return (_known.get(product.get("handle") or "") or {}).get("about")
+    return (shops.scoped(_known_BY_SHOP, dict).get(product.get("handle") or "") or {}).get("about")
 
 
 def occasions_of(product: dict) -> list[str]:
-    return (_known.get(product.get("handle") or "") or {}).get("occasions") or []
+    return (shops.scoped(_known_BY_SHOP, dict).get(product.get("handle") or "") or {}).get("occasions") or []
 
 
 def seasons_of(product: dict) -> list[str]:
     """The merchant's own answer where they gave one, ours otherwise."""
     if stated := _stated_seasons(product):
         return stated
-    return (_known.get(product.get("handle") or "") or {}).get("seasons") or []
+    return (shops.scoped(_known_BY_SHOP, dict).get(product.get("handle") or "") or {}).get("seasons") or []
 
 
 def _stem(word: str) -> str:

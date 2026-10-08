@@ -32,7 +32,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
 from app.services import audience, colours, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
-from app.services import lessons, service_health, size_finder, store_profile, suggestions, understanding
+from app.services import lessons, service_health, shops, size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
@@ -237,12 +237,12 @@ async def _named_without_looking(reply: str, cart: Cart | None, on_screen: list[
 
 def _welcome_handles() -> list[str]:
     """The collections the merchant pinned to the welcome screen, in their order."""
-    return [h.strip() for h in settings.SUPPORT_WELCOME_COLLECTIONS.split(",") if h.strip()]
+    return [h.strip() for h in shops.setting("welcome_collections", settings.SUPPORT_WELCOME_COLLECTIONS).split(",") if h.strip()]
 
 
 async def _welcome_text() -> str:
     """The greeting. Falls back to the store's own name so it is never generic."""
-    configured = settings.SUPPORT_WELCOME_MESSAGE.strip()
+    configured = shops.setting("welcome_message", settings.SUPPORT_WELCOME_MESSAGE).strip()
     if configured:
         return configured
     try:

@@ -1,0 +1,8 @@
+.env
+.git
+.a5c
+__pycache__/
+*.py[cod]
+*.db
+venv/
+.venv/

@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import time
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,9 @@ TIMEOUT_SECONDS = 45
 WAIT_IN_TURN_SECONDS = 8
 
 # lower-cased option value -> the basic colours it reads as
-_families: dict[str, set[str]] = {}
-_read_at = 0.0
-_task: asyncio.Task | None = None
+_families_BY_SHOP: dict = {}  # per shop: see services/shops
+_read_at_BY_SHOP: dict = {}  # per shop: see services/shops
+_task_BY_SHOP: dict = {}  # per shop: see services/shops
 
 _PROMPT = """You read a children's clothing shop's product option values. Some are colour names
 (often fancy: "Dusty Raspberry", "Racing Green", "Oatmeal"), the rest are sizes or other options.
@@ -56,7 +57,6 @@ async def _read_batch(values: list[str]) -> dict[str, set[str]]:
 
 
 async def _learn() -> None:
-    global _families, _read_at
     from app.services import outfit
     catalogue = await outfit.browse_catalogue()
     values = sorted({v for p in catalogue.get("products") or [] for v in p.get("option_values") or []})
@@ -72,19 +72,18 @@ async def _learn() -> None:
             continue
         found.update(result)
     if found:
-        _families = found
-        _read_at = time.monotonic()
+        _families_BY_SHOP[shops.current()] = found
+        _read_at_BY_SHOP[shops.current()] = time.monotonic()
         logger.info("Read %d store colour names into colour families", len(found))
 
 
 def warm() -> asyncio.Task | None:
     """Start reading the store's colour names unless a fresh reading exists."""
-    global _task
-    if _families and time.monotonic() - _read_at < CACHE_SECONDS:
+    if _families_BY_SHOP.get(shops.current(), {}) and time.monotonic() - _read_at_BY_SHOP.get(shops.current(), 0.0) < CACHE_SECONDS:
         return None
-    if _task is None or _task.done():
-        _task = asyncio.create_task(_learn())
-    return _task
+    if _task_BY_SHOP.get(shops.current(), None) is None or _task_BY_SHOP.get(shops.current(), None).done():
+        _task_BY_SHOP[shops.current()] = asyncio.create_task(_learn())
+    return _task_BY_SHOP.get(shops.current(), None)
 
 
 async def shades_of(colours: tuple[str, ...]) -> tuple[str, ...]:
@@ -93,10 +92,10 @@ async def shades_of(colours: tuple[str, ...]) -> tuple[str, ...]:
     if not wanted:
         return ()
     task = warm()
-    if task is not None and not _families:
+    if task is not None and not _families_BY_SHOP.get(shops.current(), {}):
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=WAIT_IN_TURN_SECONDS)
         except Exception:  # noqa: BLE001 - still reading: the word alone for now
             pass
-    shades = {name for name, fams in _families.items() if fams & wanted}
+    shades = {name for name, fams in _families_BY_SHOP.get(shops.current(), {}).items() if fams & wanted}
     return tuple(sorted(wanted | shades))

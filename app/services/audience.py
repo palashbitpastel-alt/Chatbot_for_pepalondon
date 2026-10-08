@@ -21,6 +21,7 @@ import re
 import time
 
 from app.services.shopify_client import ShopifyError, graphql
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ query AudienceTags($cursor: String) {
 """
 
 # group -> the store's own tags (lower-cased) that mean it.
-_tag_map: tuple[float, dict[str, set[str]]] | None = None
+_tag_map_BY_SHOP: dict = {}  # per shop: see services/shops
 # product id -> groups the model read off its name ([] means anyone).
 _products: dict[str, tuple[float, list[str]]] = {}
 _lock = asyncio.Lock()
@@ -91,11 +92,10 @@ async def _store_tags() -> list[str]:
 
 async def ensure() -> None:
     """Read which of the store's tags mean Boys, Girls or Baby (cached)."""
-    global _tag_map
-    if _tag_map and time.monotonic() - _tag_map[0] < CACHE_SECONDS:
+    if _tag_map_BY_SHOP.get(shops.current(), None) and time.monotonic() - _tag_map_BY_SHOP.get(shops.current(), None)[0] < CACHE_SECONDS:
         return
     async with _lock:
-        if _tag_map and time.monotonic() - _tag_map[0] < CACHE_SECONDS:
+        if _tag_map_BY_SHOP.get(shops.current(), None) and time.monotonic() - _tag_map_BY_SHOP.get(shops.current(), None)[0] < CACHE_SECONDS:
             return
         mapping = _fallback()
         try:
@@ -112,22 +112,22 @@ async def ensure() -> None:
         except (ShopifyError, KeyError, ValueError, AttributeError, asyncio.TimeoutError, Exception):  # noqa: BLE001
             logger.warning("Could not read the store's audience tags; using exact names", exc_info=True)
             # Keep an older reading rather than fall back to bare names.
-            if _tag_map:
-                mapping = _tag_map[1]
-        _tag_map = (time.monotonic(), mapping)
+            if _tag_map_BY_SHOP.get(shops.current(), None):
+                mapping = _tag_map_BY_SHOP.get(shops.current(), None)[1]
+        _tag_map_BY_SHOP[shops.current()] = (time.monotonic(), mapping)
         logger.info("Audience tags: %s", {g: sorted(v) for g, v in mapping.items()})
 
 
 def tags_for(group: str) -> list[str]:
     """The store's tags that mean this group (for a Shopify tag search)."""
-    mapping = _tag_map[1] if _tag_map else _fallback()
+    mapping = _tag_map_BY_SHOP.get(shops.current(), None)[1] if _tag_map_BY_SHOP.get(shops.current(), None) else _fallback()
     return sorted(mapping.get(group) or {group.lower()})
 
 
 def of(tags: list[str] | None, product_id: str | int | None = None) -> list[str]:
     """Who a product is for: by the store's tags, else by what the model read
     off its name. [] means any child."""
-    mapping = _tag_map[1] if _tag_map else _fallback()
+    mapping = _tag_map_BY_SHOP.get(shops.current(), None)[1] if _tag_map_BY_SHOP.get(shops.current(), None) else _fallback()
     lowered = {str(t).strip().lower() for t in tags or []}
     found = [g for g in GROUPS if lowered & mapping.get(g, set())]
     if found:

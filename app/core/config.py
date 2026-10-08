@@ -139,6 +139,15 @@ class Settings(BaseSettings):
     SHOPIFY_CLIENT_ID: str = ""
     SHOPIFY_CLIENT_SECRET: str = ""
     SHOPIFY_STORE_URL: str = ""
+    # More shops this one backend serves, comma separated myshopify domains
+    # ("second-store.myshopify.com,third-store.myshopify.com"). Each needs the
+    # app installed; SHOPIFY_STORE_URL stays the default shop.
+    SUPPORT_SHOPS: str = ""
+    # Their text settings, until each shop has an admin page: a JSON object
+    # keyed by domain - {"second-store.myshopify.com": {"name": "...",
+    # "description": "...", "welcome_message": "...", "welcome_collections": "..."}}.
+    # Anything left out: the shop's own name from Shopify, and no description.
+    SUPPORT_SHOP_SETTINGS: str = ""
     SHOPIFY_ACCESS_TOKEN: str = ""
     # Storefront API token for Shopify's own search (see services/shopify_search).
     # Optional: without it the app tries to make one, then uses the Admin search.

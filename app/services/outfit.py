@@ -20,7 +20,7 @@ import time
 from decimal import Decimal, InvalidOperation
 
 from app.services import audience as audience_reader
-from app.services import occasions, parts, suits
+from app.services import occasions, parts, shops, suits
 from app.services.shopify_client import ShopifyError, graphql
 from app.services.shopify_storefront import (
     product_image,
@@ -214,15 +214,14 @@ def _suits(tags: list[str] | None, product_id=None) -> list[str]:
 # time. Held briefly, handed out as copies because callers annotate it. Stock is
 # re-read live before anything goes in the bag, so a short hold cannot sell
 # something that has just sold out.
-_CATALOGUE: tuple[float, dict] | None = None
+_CATALOGUE_BY_SHOP: dict = {}  # per shop: see services/shops
 CATALOGUE_SECONDS = 120
 
 
 async def browse_catalogue() -> dict:
     """Everything a shopper can buy, grouped by category so a look can be composed."""
-    global _CATALOGUE
-    if _CATALOGUE and time.monotonic() - _CATALOGUE[0] < CATALOGUE_SECONDS:
-        return copy.deepcopy(_CATALOGUE[1])
+    if _CATALOGUE_BY_SHOP.get(shops.current(), None) and time.monotonic() - _CATALOGUE_BY_SHOP.get(shops.current(), None)[0] < CATALOGUE_SECONDS:
+        return copy.deepcopy(_CATALOGUE_BY_SHOP.get(shops.current(), None)[1])
     currency = (await shop_info())["currency"]
     products = []
     for node in await _active_products():
@@ -290,7 +289,7 @@ async def browse_catalogue() -> dict:
         "categories": by_category,
         "products": products,
     }
-    _CATALOGUE = (time.monotonic(), result)
+    _CATALOGUE_BY_SHOP[shops.current()] = (time.monotonic(), result)
     return copy.deepcopy(result)
 
 

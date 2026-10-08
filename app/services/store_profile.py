@@ -10,6 +10,7 @@ import logging
 from app.core.config import settings
 from app.services import shopify_storefront
 from app.services.suggestions import plural
+from app.services import shops
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def _singular(name: str) -> str:
 
 async def store_name() -> str:
     """What the shop is called: the configured brand, else Shopify's own name."""
-    configured = settings.SUPPORT_STORE_NAME.strip()
+    configured = shops.setting("name", settings.SUPPORT_STORE_NAME).strip()
     if configured:
         return configured
     return (await shopify_storefront.shop_info())["name"]
@@ -50,7 +51,7 @@ async def overview(limit: int = 6) -> dict:
     sound small, and it is out of date the moment the catalogue changes. Each
     part is optional, so a slow lookup costs a detail rather than the answer.
     """
-    about: dict = {"what_we_sell": settings.SUPPORT_STORE_DESCRIPTION}
+    about: dict = {"what_we_sell": shops.setting("description", settings.SUPPORT_STORE_DESCRIPTION)}
     try:
         about["name"] = await store_name()
     except Exception:  # noqa: BLE001
@@ -69,7 +70,7 @@ async def overview(limit: int = 6) -> dict:
 # This is that sense, built from the catalogue itself and refreshed as it
 # changes, small enough to ride along with every single turn.
 
-_FACTS_CACHE: tuple[float, str] | None = None
+_FACTS_CACHE_BY_SHOP: dict = {}  # per shop: see services/shops
 FACTS_SECONDS = 900
 
 
@@ -89,14 +90,13 @@ async def facts() -> str:
     Everything here is read from the store: nothing is written into the code, so
     a shop that starts selling coats says so the next time this refreshes.
     """
-    global _FACTS_CACHE
     import time
 
     from app.services import occasions, outfit
 
     now = time.monotonic()
-    if _FACTS_CACHE and now - _FACTS_CACHE[0] < FACTS_SECONDS:
-        return _FACTS_CACHE[1]
+    if _FACTS_CACHE_BY_SHOP.get(shops.current(), None) and now - _FACTS_CACHE_BY_SHOP.get(shops.current(), None)[0] < FACTS_SECONDS:
+        return _FACTS_CACHE_BY_SHOP.get(shops.current(), None)[1]
 
     catalogue = await outfit.browse_catalogue()
     products = [p for p in catalogue["products"] if p.get("in_stock")]
@@ -105,8 +105,9 @@ async def facts() -> str:
         lines.append(f"Name: {await store_name()}")
     except Exception:  # noqa: BLE001 - a fact sheet must not fail on one lookup
         logger.debug("No store name for the fact sheet", exc_info=True)
-    if settings.SUPPORT_STORE_DESCRIPTION:
-        lines.append(f"Sells: {settings.SUPPORT_STORE_DESCRIPTION}")
+    sells = shops.setting("description", settings.SUPPORT_STORE_DESCRIPTION)
+    if sells:
+        lines.append(f"Sells: {sells}")
 
     counted: dict[str, int] = {}
     for product in products:
@@ -132,7 +133,7 @@ async def facts() -> str:
         lines.append("Anything else - a ski suit, school uniform - we do not stock: say so plainly.")
 
     text = "\n".join(lines)
-    _FACTS_CACHE = (now, text)
+    _FACTS_CACHE_BY_SHOP[shops.current()] = (now, text)
     return text
 
 
@@ -149,7 +150,7 @@ query ShopPolicies {
   }
 }
 """
-_POLICY_CACHE: tuple[float, list[dict]] | None = None
+_POLICY_CACHE_BY_SHOP: dict = {}  # per shop: see services/shops
 POLICY_SECONDS = 900
 POLICY_CHARS = 900
 
@@ -168,14 +169,13 @@ def _plain(html: str | None) -> str:
 
 async def policies() -> list[dict]:
     """Every policy the merchant has published, as plain text. Empty if none are."""
-    global _POLICY_CACHE
     import time
 
     from app.services.shopify_client import graphql
 
     now = time.monotonic()
-    if _POLICY_CACHE and now - _POLICY_CACHE[0] < POLICY_SECONDS:
-        return _POLICY_CACHE[1]
+    if _POLICY_CACHE_BY_SHOP.get(shops.current(), None) and now - _POLICY_CACHE_BY_SHOP.get(shops.current(), None)[0] < POLICY_SECONDS:
+        return _POLICY_CACHE_BY_SHOP.get(shops.current(), None)[1]
     data = await graphql(POLICIES)
     found = []
     for policy in ((data.get("shop") or {}).get("shopPolicies") or []):
@@ -187,5 +187,5 @@ async def policies() -> list[dict]:
             "text": body[:POLICY_CHARS] + ("…" if len(body) > POLICY_CHARS else ""),
             "url": policy.get("url"),
         })
-    _POLICY_CACHE = (now, found)
+    _POLICY_CACHE_BY_SHOP[shops.current()] = (now, found)
     return found

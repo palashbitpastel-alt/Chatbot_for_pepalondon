@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.shops import ShopMiddleware
 from sqlalchemy import text
 
 from app.api.v1.router import api_router
@@ -35,7 +36,10 @@ async def enable_pgvector() -> None:
         logger.warning("Could not enable the pgvector extension", exc_info=True)
 
 
-async def _read_products() -> None:
+async def _read_products(shop: str | None = None) -> None:
+    """Read one shop's products in the background (each shop on its own)."""
+    from app.services import shops
+    shops.set_current(shop)  # this task's own context
     try:
         from app.services import outfit, suits
 
@@ -68,7 +72,11 @@ async def lifespan(app: FastAPI):
 
     # Read what every product is for, worn when, and made of - in the background,
     # so the first shopper does not wait for it. Kept in the database after.
-    asyncio.create_task(_read_products())
+    # Every shop this backend serves, so a newly added shop's first question
+    # does not wait for its whole catalogue to be read.
+    from app.services import shops
+    for shop in sorted(shops.allowed()):
+        asyncio.create_task(_read_products(shop))
 
     logger.info(
         "Retrieval backend: %s (%s)",
@@ -79,6 +87,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
+
+# Which shop each request is for (see services/shops). Added before CORS so
+# CORS wraps it and a refused shop still gets a readable answer.
+app.add_middleware(ShopMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
