@@ -235,8 +235,8 @@ def _plan_sections(shop: str, info: dict) -> str:
                         f"The assistant keeps running until {_nice_date(info.get('grace_until') or '')}, then pauses. "
                         "Renew now to avoid a break."))
     elif days is not None and days <= 7:
-        banners.append(("warning", f"Your plan renews in {days} day{'s' if days != 1 else ''}",
-                        "Pay before then to keep the assistant running without a break."))
+        banners.append(("warning", "Your plan ends today" if days == 0 else f"Your plan ends in {days} day{'s' if days != 1 else ''}",
+                        "Renew below before then to keep the assistant running without a break."))
     if info.get("running") and pct is not None and pct >= 100:
         banners.append(("critical", "You have used all of this month's chats",
                         "New conversations are paused until next month. Upgrade to continue now."))
