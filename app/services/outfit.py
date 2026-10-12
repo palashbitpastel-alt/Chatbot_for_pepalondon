@@ -1244,7 +1244,7 @@ async def complete_the_look(product: str, size: str | None = None,
             item["size"] = picked_one["size"]
         return item
 
-    look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget)
+    look = await build_outfit([line(anchor), *[line(p) for p in picked]], budget, anchor=anchor["handle"])
     if not picked and (note := _range_note(stock, audience, age)):
         look["nothing_else_fits"] = note
     if sizes_unknown:
@@ -1445,8 +1445,13 @@ def _match_variant(product: dict, want_colour: str | None, want_size: str | None
     return next((v for v in candidates if v["availableForSale"]), candidates[0])
 
 
-async def build_outfit(items: str | list, budget: float | None = None) -> dict:
-    """Price a chosen look exactly and name the variants the frontend should add."""
+async def build_outfit(items: str | list, budget: float | None = None, anchor: str | None = None) -> dict:
+    """Price a chosen look exactly and name the variants the frontend should add.
+
+    anchor: the handle of the piece the shopper asked to style (complete the
+    look). It is their own choice, so the checks below never take it out of
+    its own look - a coat tagged only "Baby" was dropped from a boy's look
+    built around it, leaving the companions without the piece they go with."""
     try:
         requested = _parse_items(items)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -1493,7 +1498,8 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
                  "category": product.get("productType"),
                  "for": audience_reader.of(product.get("tags"), product.get("legacyResourceId")),
                  "sizes": _options_of(product).get("Size") or []}
-        if for_whom and not _for_this_child([piece], for_whom):
+        chosen_by_them = bool(anchor) and handle == anchor
+        if for_whom and not chosen_by_them and not _for_this_child([piece], for_whom):
             left_out.append({"title": product["title"], "reason": "for_another_child",
                              "shopping_for": for_whom})
             continue
@@ -1503,7 +1509,7 @@ async def build_outfit(items: str | list, budget: float | None = None) -> dict:
         # goes in the look (two tops, a cardigan over a shirt) is the agent's call.
         sold_in_asked = bool(size) and any(str(size).strip().lower() == str(x).strip().lower()
                                            for x in piece["sizes"])
-        if not sold_in_asked and not _suits_age(piece, how_old):
+        if not sold_in_asked and not chosen_by_them and not _suits_age(piece, how_old):
             left_out.append({"title": product["title"], "reason": "not_made_for_this_age",
                              "age": how_old})
             continue
