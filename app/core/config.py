@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     GEMINI_TOKENS_PER_SECOND: int = 100
     # After a rate limit (429), that model is skipped for this long (0 = never).
     GEMINI_REST_SECONDS: int = 60
+    # How often each shop is read again for what kind of shop it is (services/store_kind).
+    STORE_KIND_REFRESH_HOURS: float = 24
 
     # The storefront widget can send who is signed in, but that block comes from
     # the browser and can say anything. Off by default: with it on, anyone who

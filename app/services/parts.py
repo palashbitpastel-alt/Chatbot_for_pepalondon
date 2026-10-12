@@ -22,6 +22,7 @@ words are read instead, in this order:
 import json
 import logging
 import re
+from app.services import store_kind
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ _TAXONOMY = (
 )
 
 _ASK = (
-    "A children's clothing shop files its products under these product types:\n"
+    "{Shop_kind} files its products under these product types:\n"
     "{types}\n\n"
     "For each one, say which part of an outfit it is. Use exactly one of: "
     "Top, Bottoms, Dress, Outerwear, Shoes, Accessory, Other.\n"
@@ -82,7 +83,7 @@ async def learn(types: list[str]) -> dict[str, str]:
         # Without it, the classifier's JSON was streamed to the shopper, ahead of
         # their actual answer.
         answer = await build_llm(temperature=0, max_tokens=700).ainvoke(
-            _ASK.format(types="\n".join(f"- {t}" for t in unknown)),
+            (await store_kind.fill(_ASK)).format(types="\n".join(f"- {t}" for t in unknown)),
             config={"callbacks": [], "tags": ["parts"], "run_name": "learn_parts"})
         text = answer.content if hasattr(answer, "content") else str(answer)
         if block := re.search(r"\{.*\}", text, re.S):

@@ -33,7 +33,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
 from app.services import audience, colours, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
-from app.services import billing, lessons, service_health, shops, size_finder, store_profile, suggestions, understanding
+from app.services import billing, lessons, service_health, shops, size_finder, store_kind, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
@@ -713,6 +713,13 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         briefing = f"{briefing}\n\n{about}" if briefing else about
     except Exception:  # noqa: BLE001 - a fact sheet must never cost the answer
         logger.warning("Could not read the store facts for this turn", exc_info=True)
+    # The instructions were written for a children's clothing shop; any other
+    # kind of shop is told how to read them (services/store_kind).
+    try:
+        if note := store_kind.instructions_note(await store_kind.profile()):
+            briefing = f"{briefing}\n{note}" if briefing else note
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read the kind of shop for this turn", exc_info=True)
     if _is_greeting(req.message):
         store = await _store_briefing(req.customer)
         briefing = f"{briefing}\n\n{store}" if briefing else store

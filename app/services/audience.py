@@ -22,6 +22,7 @@ import time
 
 from app.services.shopify_client import ShopifyError, graphql
 from app.services import shops
+from app.services import store_kind
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ _tag_map_BY_SHOP: dict = {}  # per shop: see services/shops
 _products: dict[str, tuple[float, list[str]]] = {}
 _lock = asyncio.Lock()
 
-_TAG_PROMPT = """You map a children's clothing shop's product tags to who a product is for.
+_TAG_PROMPT = """You map {shop_kind}'s product tags to who a product is for.
 Groups: "Boys", "Girls", "Baby" (a baby of either sex).
 Return ONLY a JSON object {"Boys": [...], "Girls": [...], "Baby": [...]} listing, exactly as
 written, the tags that say a product is for that group - in any language or spelling
@@ -54,7 +55,7 @@ written, the tags that say a product is for that group - in any language or spel
 colour, size, fabric, occasion, product kind or anything else goes nowhere. Adult tags
 ("men", "women") go nowhere."""
 
-_PRODUCT_PROMPT = """You read a children's clothing shop's products and say who each is for.
+_PRODUCT_PROMPT = """You read {shop_kind}'s products and say who each is for.
 Groups: "Boys", "Girls", "Baby". Return ONLY a JSON object mapping each id to a list of
 groups. Use [] when the product suits any child (most basics, shoes and accessories do)
 or you cannot tell. Judge from what the product is, not from colour or pattern alone:
@@ -101,7 +102,7 @@ async def ensure() -> None:
         try:
             tags = await _store_tags()
             if tags:
-                read = await _llm_json(_TAG_PROMPT, json.dumps(tags, ensure_ascii=False))
+                read = await _llm_json(await store_kind.fill(_TAG_PROMPT), json.dumps(tags, ensure_ascii=False))
                 known = {t.lower(): t for t in tags}
                 mapping = {g: {t.lower() for t in (read.get(g) or []) if isinstance(t, str) and t.lower() in known}
                            for g in GROUPS}
@@ -154,7 +155,7 @@ async def learn(products: list[dict]) -> None:
         chunk = todo[start:start + BATCH]
         listing = {str(p["product_id"]): f'{p.get("title") or ""} | {p.get("category") or ""}' for p in chunk}
         try:
-            read = await _llm_json(_PRODUCT_PROMPT, json.dumps(listing, ensure_ascii=False))
+            read = await _llm_json(await store_kind.fill(_PRODUCT_PROMPT), json.dumps(listing, ensure_ascii=False))
         except Exception:  # noqa: BLE001 - unread products simply suit any child
             logger.warning("Could not read who %d products are for", len(chunk), exc_info=True)
             continue

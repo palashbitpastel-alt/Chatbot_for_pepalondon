@@ -28,6 +28,7 @@ import json
 import logging
 import re
 from app.services import shops
+from app.services import store_kind
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ BATCH = 10
 READINGS_KEY = "product_readings"
 
 _ASK = (
-    "You are reading a children's clothing shop's own product list.\n"
+    "You are reading {shop_kind}'s own product list.\n"
     "For each piece, say which occasions it suits and which seasons it is worn in.\n\n"
     "Occasions, use only these: " + ", ".join(OCCASIONS) + "\n"
     "Seasons, use only these: " + ", ".join(SEASONS) + "\n\n"
@@ -171,7 +172,7 @@ async def learn(products: list[dict]) -> dict[str, dict]:
         try:
             async with gate:
                 answer = await model.ainvoke(
-                    _ASK.format(pieces=lines),
+                    (await store_kind.fill(_ASK)).format(pieces=lines),
                     # This runs inside a shopper's turn; without its own callbacks the
                     # JSON would stream to them ahead of their answer.
                     config={"callbacks": [], "tags": ["suits"], "run_name": "learn_suits"})

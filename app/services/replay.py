@@ -25,6 +25,7 @@ from sqlalchemy import delete, select
 from app.db.models import ChatMessage, KnowledgeChunk, StoreSetting
 from app.db.session import AsyncSessionLocal
 from app.services import lessons
+from app.services import store_kind
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ JUDGE_TIMEOUT = 60
 
 _task: asyncio.Task | None = None
 
-_JUDGE = """You check a children's clothing shop assistant against its owner's review.
+_JUDGE = """You check the shopping assistant of {shop_kind} against its owner's review.
 You get the conversation so far, what the owner said about the assistant's ORIGINAL answer,
 and the assistant's NEW answer to the same message (with the products it showed).
 Decide whether the NEW answer handles the moment the way the owner wants:
@@ -170,7 +171,7 @@ async def _judge(case: dict, new: dict) -> dict:
              f"NEW answer:\n{new['reply']}\nProducts shown with it: {', '.join(new['shown']) or 'none'}")
     try:
         answer = await asyncio.wait_for(build_llm(temperature=0, max_tokens=300).ainvoke(
-            [("system", _JUDGE), ("human", human)]), timeout=JUDGE_TIMEOUT)
+            [("system", await store_kind.fill(_JUDGE)), ("human", human)]), timeout=JUDGE_TIMEOUT)
         text = answer.content if isinstance(answer.content, str) else str(answer.content)
         found = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
         return {"pass": bool(found.get("pass")), "reason": str(found.get("reason", ""))[:300]}

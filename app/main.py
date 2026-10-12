@@ -41,7 +41,10 @@ async def _read_products(shop: str | None = None) -> None:
     from app.services import shops
     shops.set_current(shop)  # this task's own context
     try:
-        from app.services import outfit, suits
+        from app.services import outfit, store_kind, suits
+
+        # What kind of shop it is first: the product readings below say it.
+        await store_kind.profile()
 
         catalogue = await outfit.browse_catalogue()
         await suits.learn([p for p in catalogue["products"] if p["in_stock"]])

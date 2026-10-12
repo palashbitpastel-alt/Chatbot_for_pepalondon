@@ -8,6 +8,7 @@ assistant would - the person the purchase is FOR, not whoever is mentioned -
 and the word lists are kept only as a fallback if that call fails.
 """
 
+from app.services import store_kind
 import asyncio
 import json
 import logging
@@ -24,7 +25,7 @@ TIMEOUT_SECONDS = 20
 _last_reading: dict[str, dict] = {}
 _LAST_READINGS = 2000
 
-_PROMPT = """You read a shopper's messages to a children's clothing shop and note what they want.
+_PROMPT = """You read a shopper's messages to {shop_kind} and note what they want.
 Return ONLY a JSON object with these keys, each a short string or null when not said:
 - "for": "Girl", "Boy" or "Baby" - the person the purchase is FOR (the recipient). Baby only
   for a baby whose sex is not given. Only when it is clear: if the messages leave it open or
@@ -118,7 +119,7 @@ async def understood(messages: list[str], base: dict | None = None, currency: st
         from app.agent.base import build_llm
         llm = build_llm(temperature=0, max_tokens=200)
         answer = await asyncio.wait_for(llm.ainvoke([
-            ("system", _PROMPT.format(sym=sym, remembered=remembered)),
+            ("system", (await store_kind.fill(_PROMPT)).format(sym=sym, remembered=remembered)),
             ("human", "\n".join(f"- {m}" for m in said[-24:])),
         ]), timeout=TIMEOUT_SECONDS)
         text = answer.content if isinstance(answer.content, str) else str(answer.content)

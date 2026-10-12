@@ -11,6 +11,7 @@ Reads are live from the Shopify Admin API and restricted to ACTIVE products, so
 a look can never contain something a shopper cannot buy.
 """
 
+from app.services import store_kind
 import asyncio
 import copy
 import json
@@ -1010,7 +1011,7 @@ def _same_size(piece: dict, size: str | None) -> bool:
     return False
 
 
-_STYLIST = """You are the senior stylist of a children's clothing shop. Put together ONE complete look
+_STYLIST = """You are the senior stylist of {shop_kind}. Put together ONE complete look
 around the anchor piece, choosing ONLY from the candidates given (every one is in stock, in
 this child's size and for this child). In this shop a complete look is one the child can wear out of the door: dressed top to toe,
 shoes included, and then finished. You decide, as a professional stylist would:
@@ -1069,7 +1070,7 @@ async def _stylist(anchor: dict, pool: list[dict], *, age, size, audience, budge
         **({"at_most_pieces": most} if most else {}),
         "candidates": candidates,
     }
-    ask = [("system", _STYLIST), ("human", json.dumps(brief, ensure_ascii=False))]
+    ask = [("system", await store_kind.fill(_STYLIST)), ("human", json.dumps(brief, ensure_ascii=False))]
     for _ in range(2):
         try:
             # callbacks=[]: inside a shopper's turn, the JSON must not stream to them.

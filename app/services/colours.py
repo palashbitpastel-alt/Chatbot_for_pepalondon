@@ -18,6 +18,7 @@ import logging
 import re
 import time
 from app.services import shops
+from app.services import store_kind
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ _families_BY_SHOP: dict = {}  # per shop: see services/shops
 _read_at_BY_SHOP: dict = {}  # per shop: see services/shops
 _task_BY_SHOP: dict = {}  # per shop: see services/shops
 
-_PROMPT = """You read a children's clothing shop's product option values. Some are colour names
+_PROMPT = """You read {shop_kind}'s product option values. Some are colour names
 (often fancy: "Dusty Raspberry", "Racing Green", "Oatmeal"), the rest are sizes or other options.
 For EVERY value that names a colour, list the basic colour words a shopper might call it -
 include each one a shopper could reasonably see in it ("Dusty Raspberry": ["pink", "red"],
@@ -48,7 +49,7 @@ def _word(text: str) -> str:
 async def _read_batch(values: list[str]) -> dict[str, set[str]]:
     from app.agent.base import build_llm
     answer = await asyncio.wait_for(build_llm(temperature=0, max_tokens=3000).ainvoke([
-        ("system", _PROMPT), ("human", json.dumps(values, ensure_ascii=False))]), timeout=TIMEOUT_SECONDS)
+        ("system", await store_kind.fill(_PROMPT)), ("human", json.dumps(values, ensure_ascii=False))]), timeout=TIMEOUT_SECONDS)
     text = answer.content if isinstance(answer.content, str) else str(answer.content)
     read = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
     known = {_word(v) for v in values}
