@@ -8,7 +8,8 @@ webhook), the plan is switched on for those months with no one in between.
 
 Which provider: whichever has its keys set (STRIPE_SECRET_KEY, or
 RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET); PAYMENT_PROVIDER picks one when both
-are. With neither, checkout() returns None and the Plan page falls back to a
+are. PAYMENT_PROVIDER=demo uses our own test checkout instead: no account, no
+money, the same activation - for trying the flow before real keys exist. With neither, checkout() returns None and the Plan page falls back to a
 request we accept by hand.
 
 Plain HTTP to both providers' APIs - no SDK. Webhooks are verified against
@@ -19,6 +20,7 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
 import time
 from datetime import date
 
@@ -38,6 +40,8 @@ class PaymentError(RuntimeError):
 
 def provider() -> str | None:
     chosen = (settings.PAYMENT_PROVIDER or "").strip().lower()
+    if chosen == "demo":
+        return "demo"
     stripe = bool(settings.STRIPE_SECRET_KEY)
     razorpay = bool(settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET)
     if chosen == "stripe" and stripe:
@@ -67,6 +71,11 @@ async def checkout(shop: str, plan_key: str, months: int) -> str | None:
     currency = (settings.BILLING_CURRENCY or "USD").upper()
     notes = {"shop": shops.normalise(shop), "plan": plan_key, "months": str(months)}
     back = _back_to_app(shop)
+    if which == "demo":
+        token = demo_token({**notes, "amount": amount, "currency": currency,
+                            "label": _label(plan, months), "ref": "test_" + secrets.token_hex(6)})
+        # Relative: the Plan page (served by this backend) opens it on our own host.
+        return f"/api/v1/payments/demo?t={token}"
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             if which == "stripe":
@@ -96,6 +105,42 @@ async def checkout(shop: str, plan_key: str, months: int) -> str | None:
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         logger.warning("Could not open a %s checkout for %s: %s", which, shop, exc)
         raise PaymentError("The payment page could not be opened just now. Please try again.") from exc
+
+
+# ── Test checkout (PAYMENT_PROVIDER=demo) ───────────────────────────────────
+# The order travels in a signed token, so the test page can't be used to
+# pay for something other than what the merchant picked.
+
+def demo_token(order: dict) -> str:
+    import base64
+    payload = base64.urlsafe_b64encode(json.dumps({**order, "exp": int(time.time()) + 3600}).encode()).decode().rstrip("=")
+    sig = hmac.new(settings.SHOPIFY_CLIENT_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def demo_order(token: str) -> dict | None:
+    import base64
+    payload, _, sig = (token or "").partition(".")
+    expected = hmac.new(settings.SHOPIFY_CLIENT_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    if not payload or not hmac.compare_digest(expected, sig):
+        return None
+    try:
+        order = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except ValueError:
+        return None
+    return order if order.get("exp", 0) > time.time() else None
+
+
+async def demo_pay(order: dict) -> str:
+    """Pay the test order: the same activation a real payment gets. Returns where to go next."""
+    await activate({"shop": shops.normalise(order["shop"]), "plan": order["plan"], "months": int(order["months"]),
+                    "amount": round(order["amount"] / 100, 2), "currency": order["currency"],
+                    "reference": order["ref"], "provider": "test"})
+    return _back_to_app(order["shop"])
+
+
+def back_to_app(shop: str) -> str:
+    return _back_to_app(shop)
 
 
 # ── Webhooks ────────────────────────────────────────────────────────────────
