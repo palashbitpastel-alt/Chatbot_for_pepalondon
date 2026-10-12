@@ -25,6 +25,34 @@ from app.services import installs, shops
 
 KEY = "_billing"
 
+# The plans merchants see on the app's page. SUPPORT_PLANS (a JSON list in the
+# same shape) replaces these without a code change. payment_url: a Stripe or
+# Razorpay payment link for the plan, used by its Upgrade button.
+DEFAULT_PLANS = [
+    {"key": "starter", "name": "Starter", "price": "$29 / month", "chats": 1000,
+     "features": ["1,000 chats a month", "Product search and recommendations", "Size finder", "Email support"]},
+    {"key": "growth", "name": "Growth", "price": "$79 / month", "chats": 5000,
+     "features": ["5,000 chats a month", "Everything in Starter", "Complete-the-look outfits", "Priority support"]},
+    {"key": "pro", "name": "Pro", "price": "$199 / month", "chats": 15000,
+     "features": ["15,000 chats a month", "Everything in Growth", "Custom assistant instructions", "Dedicated support"]},
+]
+
+
+def plans() -> list[dict]:
+    from app.core.config import settings
+    import json
+    try:
+        custom = json.loads(settings.SUPPORT_PLANS or "null")
+        if isinstance(custom, list) and all(isinstance(p, dict) and p.get("key") for p in custom):
+            return custom
+    except ValueError:
+        pass
+    return DEFAULT_PLANS
+
+
+def plan_named(key: str | None) -> dict | None:
+    return next((p for p in plans() if p.get("key") == key), None)
+
 PAUSED_MESSAGE = "The shopping assistant isn't available on this store right now."
 LIMIT_MESSAGE = ("The shopping assistant has reached its chat limit for this month. "
                  "Please contact the store directly for help.")
@@ -33,9 +61,15 @@ LIMIT_MESSAGE = ("The shopping assistant has reached its chat limit for this mon
 def plan_for(shop: str) -> dict:
     saved = installs.settings_for(shop).get(KEY) or {}
     limit = saved.get("chat_limit")
+    chosen = plan_named(saved.get("plan"))
+    if not (isinstance(limit, int) and limit > 0):
+        limit = chosen.get("chats") if chosen else None   # the plan's own allowance
     return {
         "active": saved.get("active", True) is not False,
+        "plan": chosen["key"] if chosen else None,
         "chat_limit": int(limit) if isinstance(limit, int) and limit > 0 else None,
+        "paid_until": str(saved.get("paid_until") or ""),
+        "payment_url": str(saved.get("payment_url") or ""),
         "note": str(saved.get("note") or ""),
     }
 
@@ -81,9 +115,15 @@ async def refusal(shop: str, session_id: str) -> tuple[str, str] | None:
     return None
 
 
-async def set_plan(shop: str, active: bool, chat_limit: int | None, note: str) -> dict:
+async def set_plan(shop: str, active: bool, chat_limit: int | None, note: str, plan: str | None = None,
+                   paid_until: str = "", payment_url: str = "") -> dict:
+    import re
     value = {"active": bool(active),
+             "plan": plan if plan_named(plan) else None,
+             # Empty: the plan's own allowance. A number: a limit set for this shop.
              "chat_limit": int(chat_limit) if chat_limit and int(chat_limit) > 0 else None,
+             "paid_until": paid_until if re.fullmatch(r"\d{4}-\d{2}-\d{2}", paid_until or "") else "",
+             "payment_url": payment_url if (payment_url or "").startswith("https://") else "",
              "note": (note or "")[:300]}
     await installs.save_private(shops.normalise(shop), KEY, value)
     return plan_for(shop)
@@ -96,6 +136,35 @@ async def overview() -> list[dict]:
         shops.normalise(d) for d in (settings.SUPPORT_SHOPS or "").split(",") if d.strip()}
     out = []
     for shop in sorted(n for n in names if n):
+        custom = (installs.settings_for(shop).get(KEY) or {}).get("chat_limit")
         out.append({"shop": shop, "installed": shop in installs.installed() or shop == shops.default(),
-                    **plan_for(shop), "chats_this_month": await chats_this_month(shop)})
+                    **plan_for(shop), "custom_limit": custom if isinstance(custom, int) and custom > 0 else None,
+                    "chats_this_month": await chats_this_month(shop)})
     return out
+
+
+async def for_merchant(shop: str) -> dict:
+    """What the merchant sees on the app's page: their plan, usage and how to
+    pay - never our private note."""
+    from datetime import date
+    plan = plan_for(shop)
+    used = await chats_this_month(shop)
+    limit = plan["chat_limit"]
+    chosen = plan_named(plan["plan"])
+    days_left = None
+    if plan["paid_until"]:
+        try:
+            days_left = (date.fromisoformat(plan["paid_until"]) - date.today()).days
+        except ValueError:
+            days_left = None
+    return {
+        "active": plan["active"],
+        "plan": chosen,
+        "chats_used": used,
+        "chat_limit": limit,
+        "percent": min(100, round(used * 100 / limit)) if limit else None,
+        "paid_until": plan["paid_until"],
+        "days_left": days_left,
+        "payment_url": plan["payment_url"] or (chosen or {}).get("payment_url") or "",
+        "plans": plans(),
+    }

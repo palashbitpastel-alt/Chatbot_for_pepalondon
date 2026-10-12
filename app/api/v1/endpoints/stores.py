@@ -25,7 +25,10 @@ PAGE = Path(__file__).with_name("stores_page.html")
 class Plan(BaseModel):
     shop: str = Field(max_length=255)
     active: bool = True
+    plan: str | None = Field(default=None, max_length=40)
     chat_limit: int | None = Field(default=None, ge=0, le=10_000_000)
+    paid_until: str = Field(default="", max_length=10)
+    payment_url: str = Field(default="", max_length=500)
     note: str = Field(default="", max_length=300)
 
 
@@ -37,12 +40,13 @@ async def stores_page() -> HTMLResponse:
 @router.get("/stores/list")
 async def stores_list(x_review_key: str | None = Header(default=None)) -> dict:
     _check(x_review_key)
-    return {"stores": await billing.overview()}
+    return {"stores": await billing.overview(), "plans": billing.plans()}
 
 
 @router.post("/stores/plan")
 async def stores_plan(plan: Plan, x_review_key: str | None = Header(default=None)) -> dict:
     _check(x_review_key)
-    saved = await billing.set_plan(shops.normalise(plan.shop), plan.active, plan.chat_limit, plan.note)
+    saved = await billing.set_plan(shops.normalise(plan.shop), plan.active, plan.chat_limit, plan.note,
+                                   plan.plan, plan.paid_until, plan.payment_url)
     return {"shop": shops.normalise(plan.shop), **saved,
             "chats_this_month": await billing.chats_this_month(shops.normalise(plan.shop))}

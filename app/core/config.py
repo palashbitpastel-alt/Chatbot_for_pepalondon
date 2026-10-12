@@ -148,6 +148,10 @@ class Settings(BaseSettings):
     # "description": "...", "welcome_message": "...", "welcome_collections": "..."}}.
     # Anything left out: the shop's own name from Shopify, and no description.
     SUPPORT_SHOP_SETTINGS: str = ""
+    # Partner billing: the plans merchants see in the app (a JSON list; see
+    # services/billing.DEFAULT_PLANS for the shape), and where they write to us.
+    SUPPORT_PLANS: str = ""
+    SUPPORT_CONTACT_EMAIL: str = ""
     SHOPIFY_ACCESS_TOKEN: str = ""
     # Storefront API token for Shopify's own search (see services/shopify_search).
     # Optional: without it the app tries to make one, then uses the Admin search.

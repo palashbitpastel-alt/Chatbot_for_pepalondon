@@ -75,7 +75,8 @@ async def shopify_app(request: Request) -> HTMLResponse:
     editor = (f"https://{shop}/admin/themes/current/editor?context=apps"
               f"&activateAppId={settings.SHOPIFY_CLIENT_ID}/pepa-assistant")
     values = widget_settings.for_shop(installs.settings_for(shop))
-    return _settings_page(shop, editor, values)
+    from app.services import billing
+    return _settings_page(shop, editor, values, await billing.for_merchant(shop))
 
 
 # ── Webhooks: uninstall, and the privacy requests every app must answer ─────
@@ -152,7 +153,85 @@ def _field(f: dict, value) -> str:
     return f'<s-text-field {common} value="{_attr(value)}"></s-text-field>'
 
 
-def _settings_page(shop: str, editor: str, values: dict) -> HTMLResponse:
+def _nice_date(iso: str) -> str:
+    from datetime import date
+    try:
+        return date.fromisoformat(iso).strftime("%-d %b %Y")
+    except ValueError:
+        return iso
+
+
+def _plan_sections(shop: str, info: dict) -> str:
+    """The subscription part of the app's page: current plan, usage, paid-until,
+    how to pay, and the plans to move to."""
+    plan = info.get("plan")
+    used, limit, pct = info["chats_used"], info.get("chat_limit"), info.get("percent")
+    pay = info.get("payment_url") or ""
+    contact = settings.SUPPORT_CONTACT_EMAIL
+    days = info.get("days_left")
+    banners = []
+    if not info["active"]:
+        banners.append(("critical", "The assistant is paused on your store",
+                        "Shoppers can't chat until your plan is renewed. Renew below or contact us."))
+    elif days is not None and days < 0:
+        banners.append(("critical", "Your plan has expired", "Renew to keep the assistant running."))
+    elif days is not None and days <= 7:
+        banners.append(("warning", f"Your plan renews in {days} day{'s' if days != 1 else ''}",
+                        "Pay before then to keep the assistant running without a break."))
+    if info["active"] and pct is not None and pct >= 100:
+        banners.append(("critical", "You have used all of this month's chats",
+                        "New conversations are paused until next month. Upgrade to continue now."))
+    elif info["active"] and pct is not None and pct >= 80:
+        banners.append(("warning", f"You have used {pct}% of this month's chats",
+                        "Upgrade before you reach the limit so shoppers can keep chatting."))
+    banner_html = "".join(
+        f'<s-banner heading="{_attr(h)}" tone="{tone}"><s-paragraph>{html.escape(t)}</s-paragraph></s-banner>'
+        for tone, h, t in banners)
+    status = ('<s-badge tone="success">Active</s-badge>' if info["active"]
+              else '<s-badge tone="critical">Paused</s-badge>')
+    plan_box = (f'<s-text color="subdued">Current plan</s-text>'
+                f'<s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(plan["name"] if plan else "No plan yet")}</s-heading>{status}</s-stack>'
+                f'<s-text>{html.escape(plan["price"]) if plan else "Choose a plan below"}</s-text>')
+    usage = f"{used:,} of {limit:,}" if limit else f"{used:,}"
+    bar = (f'<div class="pa-meter" role="img" aria-label="{pct}% used"><div style="width:{pct}%"'
+           f'{" class=hot" if pct >= 80 else ""}></div></div>') if pct is not None else '<s-text color="subdued">No monthly limit</s-text>'
+    paid = (f'<s-heading>{html.escape(_nice_date(info["paid_until"]))}</s-heading>'
+            f'<s-text color="subdued">{html.escape("expired" if days is not None and days < 0 else f"in {days} days" if days is not None else "")}</s-text>'
+            ) if info.get("paid_until") else '<s-heading>–</s-heading><s-text color="subdued">Not set yet</s-text>'
+    box = lambda inner: f'<s-box padding="base" border="base" borderRadius="base"><s-stack gap="small-200">{inner}</s-stack></s-box>'
+    actions = []
+    if pay:
+        actions.append(f'<s-button variant="primary" href="{_attr(pay)}" target="_blank">Pay or renew</s-button>')
+    if contact:
+        actions.append(f'<s-button href="mailto:{_attr(contact)}?subject={_attr("Pepa Assistant - " + shop)}">Contact support</s-button>')
+    usage_section = (
+        '<s-section heading="Plan and usage"><s-stack gap="base">' + banner_html +
+        '<s-grid gridTemplateColumns="repeat(auto-fit, minmax(200px, 1fr))" gap="base">' +
+        box(plan_box) +
+        box(f'<s-text color="subdued">Chats this month</s-text><s-heading>{usage}</s-heading>{bar}') +
+        box(f'<s-text color="subdued">Paid until</s-text>{paid}') +
+        '</s-grid>' +
+        (f'<s-stack direction="inline" gap="base">{"".join(actions)}</s-stack>' if actions else '') +
+        '</s-stack></s-section>')
+    cards = []
+    for p in info.get("plans") or []:
+        current = plan is not None and p.get("key") == plan.get("key")
+        target = p.get("payment_url") or (f'mailto:{contact}?subject=Change plan to {p.get("name")} - {shop}' if contact else "")
+        better = plan is None or (p.get("chats") or 0) > (plan.get("chats") or 0)
+        button = ("" if current or not target else
+                  f'<s-button href="{_attr(target)}" target="_blank"{" variant=\"primary\"" if better else ""}>{"Upgrade" if better and plan else "Choose" if not plan else "Switch"}</s-button>')
+        features = "".join(f"<s-list-item>{html.escape(str(f))}</s-list-item>" for f in p.get("features") or [])
+        cards.append(box(
+            f'<s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(str(p.get("name")))}</s-heading>'
+            f'{"<s-badge tone=\"info\">Current plan</s-badge>" if current else ""}</s-stack>'
+            f'<s-text type="strong">{html.escape(str(p.get("price") or ""))}</s-text>'
+            f'<s-unordered-list>{features}</s-unordered-list>{button}'))
+    plans_section = ('<s-section heading="Plans"><s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">'
+                     + "".join(cards) + '</s-grid></s-section>') if cards else ""
+    return usage_section + plans_section
+
+
+def _settings_page(shop: str, editor: str, values: dict, billing_info: dict | None = None) -> HTMLResponse:
     groups: list[str] = list(dict.fromkeys(f["group"] for f in widget_settings.FIELDS))
     sections = []
     for group in groups:
@@ -170,10 +249,16 @@ def _settings_page(shop: str, editor: str, values: dict) -> HTMLResponse:
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 <script src="https://cdn.shopify.com/shopifycloud/polaris.js"></script>
 <title>Pepa Assistant</title>
+<style>
+  .pa-meter {{ height: 8px; border-radius: 4px; background: #e3e3e3; overflow: hidden; }}
+  .pa-meter > div {{ height: 100%; background: #29845a; border-radius: 4px; }}
+  .pa-meter > div.hot {{ background: #b28400; }}
+</style>
 </head><body>
 <s-page heading="Pepa Assistant" inlineSize="base">
   <s-button slot="primary-action" variant="primary" id="save-top">Save</s-button>
   <s-stack gap="base">
+    {_plan_sections(shop, billing_info) if billing_info else ''}
     <s-banner heading="Switch the assistant on in your theme" tone="info">
       <s-stack gap="small-200">
         <s-paragraph>Connected to {html.escape(shop)}. Turn on Pepa Assistant under App embeds once; everything else is set on this page.</s-paragraph>

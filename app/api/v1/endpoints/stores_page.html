@@ -16,7 +16,9 @@
   input[type=password], input[type=text], input[type=number] { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
   button { padding: 7px 14px; border: 0; border-radius: 8px; background: var(--fg); color: var(--card); cursor: pointer; }
   .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; min-width: 760px; }
+  table { border-collapse: collapse; width: 100%; min-width: 1080px; }
+  select, input[type=date], input[type=url] { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: inherit; }
+  input[type=url] { width: 200px; }
   th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
   td.num { font-variant-numeric: tabular-nums; }
@@ -28,15 +30,15 @@
 </style></head>
 <body><main>
   <h1>Stores</h1>
-  <p>Switch a client's store off when they stop paying, or set a monthly chat limit for their plan. A store that is off loses the chat launcher; over the limit, new chats get a polite "limit reached" message. Empty limit means no limit.</p>
+  <p>Pick each client's plan, the date their payment covers, and their payment link; merchants see these on the app's page in their Shopify admin. Switch a store off when they stop paying. Limit: empty uses the plan's chats. The note is private to us.</p>
   <div class="card key">
     <input id="key" type="password" placeholder="Review key" autocomplete="current-password">
     <button id="load">Show stores</button>
   </div>
   <div class="card">
     <div class="scroll"><table>
-      <thead><tr><th>Store</th><th>Status</th><th>Chats this month</th><th>Monthly limit</th><th>Note</th><th></th></tr></thead>
-      <tbody id="rows"><tr><td colspan="6"><p>Enter the review key to see the stores.</p></td></tr></tbody>
+      <thead><tr><th>Store</th><th>Status</th><th>Plan</th><th>Chats this month</th><th>Limit</th><th>Paid until</th><th>Payment link</th><th>Private note</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="9"><p>Enter the review key to see the stores.</p></td></tr></tbody>
     </table></div>
     <p class="msg" id="msg" role="status"></p>
   </div>
@@ -52,6 +54,7 @@ const call = async (path, body) => {
   if (!res.ok) throw new Error(data.detail || res.statusText);
   return data;
 };
+let PLANS = [];
 const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
 function row(s) {
   const tr = document.createElement('tr');
@@ -61,10 +64,23 @@ function row(s) {
   const lab = document.createElement('label'); lab.htmlFor = box.id; lab.textContent = s.active ? ' On' : ' Off'; lab.className = s.active ? 'on' : 'off';
   box.addEventListener('change', () => { lab.textContent = box.checked ? ' On' : ' Off'; lab.className = box.checked ? 'on' : 'off'; });
   status.append(box, lab); tr.append(status);
+  const planTd = document.createElement('td');
+  const plan = document.createElement('select');
+  plan.add(new Option('No plan', ''));
+  PLANS.forEach((p) => plan.add(new Option(`${p.name} (${p.price})`, p.key)));
+  plan.value = s.plan || '';
+  planTd.append(plan); tr.append(planTd);
   tr.append(cell(String(s.chats_this_month), 'num'));
   const limTd = document.createElement('td');
-  const lim = document.createElement('input'); lim.type = 'number'; lim.min = '0'; lim.placeholder = 'no limit'; lim.value = s.chat_limit || '';
+  const lim = document.createElement('input'); lim.type = 'number'; lim.min = '0'; lim.placeholder = 'plan';
+  lim.value = s.custom_limit || '';
   limTd.append(lim); tr.append(limTd);
+  const paidTd = document.createElement('td');
+  const paid = document.createElement('input'); paid.type = 'date'; paid.value = s.paid_until || '';
+  paidTd.append(paid); tr.append(paidTd);
+  const linkTd = document.createElement('td');
+  const link = document.createElement('input'); link.type = 'url'; link.placeholder = 'https://buy.stripe.com/…'; link.value = s.payment_url || '';
+  linkTd.append(link); tr.append(linkTd);
   const noteTd = document.createElement('td');
   const note = document.createElement('input'); note.type = 'text'; note.className = 'note'; note.value = s.note || ''; note.placeholder = 'e.g. paid until 30 Nov';
   noteTd.append(note); tr.append(noteTd);
@@ -73,7 +89,7 @@ function row(s) {
   save.addEventListener('click', async () => {
     save.disabled = true; msg.textContent = 'Saving ' + s.shop + '…';
     try {
-      const saved = await call('stores/plan', { shop: s.shop, active: box.checked, chat_limit: lim.value ? Number(lim.value) : null, note: note.value });
+      const saved = await call('stores/plan', { shop: s.shop, active: box.checked, plan: plan.value || null, chat_limit: lim.value ? Number(lim.value) : null, paid_until: paid.value, payment_url: link.value, note: note.value });
       msg.textContent = 'Saved ' + s.shop + ': ' + (saved.active ? 'on' : 'off') + (saved.chat_limit ? ', limit ' + saved.chat_limit : ', no limit') + '.';
     } catch (e) { msg.textContent = 'Could not save: ' + e.message; }
     save.disabled = false;
@@ -85,7 +101,8 @@ document.getElementById('load').addEventListener('click', async () => {
   try { sessionStorage.setItem('pepa-review-key', keyInput.value); } catch (e) { /* storage blocked */ }
   msg.textContent = 'Loading…';
   try {
-    const { stores } = await call('stores/list');
+    const { stores, plans } = await call('stores/list');
+    PLANS = plans || [];
     rows.replaceChildren(...stores.map(row));
     msg.textContent = stores.length + ' stores.';
   } catch (e) { msg.textContent = 'Could not load: ' + e.message; }
