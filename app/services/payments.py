@@ -84,6 +84,8 @@ async def checkout(shop: str, plan_key: str, months: int) -> str | None:
                     "success_url": back + "?paid=1",
                     "cancel_url": back,
                     "client_reference_id": notes["shop"],
+                    # Name and address: required for Indian Stripe accounts' export payments, useful on invoices.
+                    "billing_address_collection": "required",
                     "line_items[0][quantity]": "1",
                     "line_items[0][price_data][currency]": currency.lower(),
                     "line_items[0][price_data][unit_amount]": str(amount),
