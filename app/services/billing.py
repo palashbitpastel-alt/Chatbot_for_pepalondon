@@ -184,3 +184,28 @@ async def request_plan(shop: str, key: str) -> dict | None:
     saved["requested"] = {"plan": key, "on": date.today().isoformat()}
     await installs.save_private(shops.normalise(shop), KEY, saved)
     return saved["requested"]
+
+
+async def answer_request(shop: str, accept: bool, months: int = 1) -> dict:
+    """Accept: the shop moves to the plan it asked for, on, paid for `months`
+    from today (or from its current paid-until date if that is later).
+    Decline: the request is dropped and nothing else changes."""
+    from datetime import date
+    shop = shops.normalise(shop)
+    saved = dict(installs.settings_for(shop).get(KEY) or {})
+    asked = (saved.get("requested") or {}).get("plan")
+    saved["requested"] = None
+    if accept and plan_named(asked):
+        start = date.today()
+        try:
+            start = max(start, date.fromisoformat(saved.get("paid_until") or ""))
+        except ValueError:
+            pass
+        month = start.month - 1 + max(1, months)
+        year, month = start.year + month // 12, month % 12 + 1
+        day = min(start.day, [31, 29 if year % 4 == 0 and (year % 100 or year % 400 == 0) else 28, 31, 30, 31, 30,
+                              31, 31, 30, 31, 30, 31][month - 1])
+        saved.update({"plan": asked, "active": True, "chat_limit": None,
+                      "paid_until": date(year, month, day).isoformat()})
+    await installs.save_private(shop, KEY, saved)
+    return plan_for(shop)

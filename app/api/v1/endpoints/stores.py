@@ -3,6 +3,7 @@
 GET  /stores        the page itself (asks for the review key)
 GET  /stores/list   every shop with its plan and this month's chats
 POST /stores/plan   save one shop's switch, limit and note
+POST /stores/request  accept or decline a plan a merchant asked for
 
 Partner billing: we bill clients ourselves (see services.billing). Every data
 call needs the X-Review-Key header to equal REVIEW_KEY, like the review page.
@@ -20,6 +21,12 @@ from app.services import billing, shops
 router = APIRouter(tags=["stores"])
 
 PAGE = Path(__file__).with_name("stores_page.html")
+
+
+class Answer(BaseModel):
+    shop: str = Field(max_length=255)
+    accept: bool
+    months: int = Field(default=1, ge=1, le=24)
 
 
 class Plan(BaseModel):
@@ -50,3 +57,11 @@ async def stores_plan(plan: Plan, x_review_key: str | None = Header(default=None
                                    plan.plan, plan.paid_until, plan.payment_url)
     return {"shop": shops.normalise(plan.shop), **saved,
             "chats_this_month": await billing.chats_this_month(shops.normalise(plan.shop))}
+
+
+@router.post("/stores/request")
+async def stores_request(answer: Answer, x_review_key: str | None = Header(default=None)) -> dict:
+    """Accept or decline a plan a merchant asked for in the app."""
+    _check(x_review_key)
+    saved = await billing.answer_request(answer.shop, answer.accept, answer.months)
+    return {"shop": shops.normalise(answer.shop), **saved}
