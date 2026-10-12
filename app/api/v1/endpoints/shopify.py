@@ -66,7 +66,7 @@ def _page(body: str, shop: str | None = None, status: int = 200) -> HTMLResponse
 async def shopify_app(request: Request) -> HTMLResponse:
     id_token = request.query_params.get("id_token")
     if not id_token:
-        return _page("<h1>Pepa Assistant</h1><p>Open the app from your Shopify admin (Apps &gt; Pepa AI Chatbot).</p>")
+        return _sign_in_page()
     try:
         shop = await installs.install(id_token)
     except installs.InstallError as exc:
@@ -76,7 +76,7 @@ async def shopify_app(request: Request) -> HTMLResponse:
               f"&activateAppId={settings.SHOPIFY_CLIENT_ID}/pepa-assistant")
     values = widget_settings.for_shop(installs.settings_for(shop))
     from app.services import billing
-    return _settings_page(shop, editor, values, await billing.for_merchant(shop))
+    return _home_page(shop, editor, values, await billing.for_merchant(shop))
 
 
 # ── Webhooks: uninstall, and the privacy requests every app must answer ─────
@@ -231,17 +231,27 @@ def _plan_sections(shop: str, info: dict) -> str:
     return usage_section + plans_section
 
 
-def _settings_page(shop: str, editor: str, values: dict, billing_info: dict | None = None) -> HTMLResponse:
-    groups: list[str] = list(dict.fromkeys(f["group"] for f in widget_settings.FIELDS))
-    sections = []
-    for group in groups:
-        fields = "".join(_field(f, values.get(f["id"])) for f in widget_settings.FIELDS if f["group"] == group)
-        layout = (f'<s-grid gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))" gap="base">{fields}</s-grid>'
-                  if group in _GRID_GROUPS else f'<s-stack gap="base">{fields}</s-stack>')
-        sections.append(f'<s-section heading="{_attr(group)}"><s-stack gap="base">'
-                        f'<s-paragraph color="subdued">{html.escape(_GROUP_HELP.get(group, ""))}</s-paragraph>'
-                        f'{layout}</s-stack></s-section>')
-    types = {f["id"]: f["type"] for f in widget_settings.FIELDS}
+APP_BASE = "/api/v1/shopify/app"
+# The app's pages in the Shopify admin sidebar (s-app-nav), with the setting
+# groups each one holds. The home page is the app's own name in the sidebar.
+_APP_PAGES = [
+    ("content", "Content", ["Assistant", "Texts"]),
+    ("appearance", "Appearance", ["Colours", "Fonts and corners", "Launcher", "Messages and chips",
+                                  "Variant options", "Product cards"]),
+    ("behaviour", "Behaviour", ["Where it shows", "Teaser message", "Features", "Talk to our team"]),
+    ("plan", "Plan", None),
+]
+_PAGE_HELP = {
+    "content": "What the assistant says: your store's name and description, and the words shoppers see.",
+    "appearance": "How the assistant looks: colours, fonts, the launcher, chips and product cards.",
+    "behaviour": "Where the assistant shows, the teaser, which parts are on, and how to reach your team.",
+    "plan": "Your plan, this month's chats, and how to pay or change plan.",
+}
+
+
+def _shell(shop: str, heading: str, body: str, script: str = "", save: bool = False) -> HTMLResponse:
+    """One app page: App Bridge, Polaris, the sidebar menu, a heading."""
+    nav = "".join(f'<s-link href="{APP_BASE}/{key}">{html.escape(label)}</s-link>' for key, label, _ in _APP_PAGES)
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -255,23 +265,56 @@ def _settings_page(shop: str, editor: str, values: dict, billing_info: dict | No
   .pa-meter > div.hot {{ background: #b28400; }}
 </style>
 </head><body>
-<s-page heading="Pepa Assistant" inlineSize="base">
-  <s-button slot="primary-action" variant="primary" id="save-top">Save</s-button>
-  <s-stack gap="base">
-    {_plan_sections(shop, billing_info) if billing_info else ''}
-    <s-banner heading="Switch the assistant on in your theme" tone="info">
-      <s-stack gap="small-200">
-        <s-paragraph>Connected to {html.escape(shop)}. Turn on Pepa Assistant under App embeds once; everything else is set on this page.</s-paragraph>
-        <s-stack direction="inline"><s-button href="{_attr(editor)}" target="_top">Open the theme editor</s-button></s-stack>
-      </s-stack>
-    </s-banner>
-    <form id="settings" data-save-bar data-discard-confirmation>
-      <s-stack gap="base">{''.join(sections)}</s-stack>
-    </form>
-    <s-paragraph color="subdued">Changes show on your store the next time a page loads.</s-paragraph>
-  </s-stack>
+<s-app-nav><s-link href="{APP_BASE}" rel="home">Home</s-link>{nav}</s-app-nav>
+<s-page heading="{_attr(heading)}" inlineSize="base">
+  {'<s-button slot="primary-action" variant="primary" id="save-top">Save</s-button>' if save else ''}
+  <s-stack gap="base">{body}</s-stack>
 </s-page>
-<script>
+{script}
+</body></html>"""
+    return HTMLResponse(page, headers={"Content-Security-Policy": f"frame-ancestors https://admin.shopify.com https://{shop};"})
+
+
+def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse:
+    plan = info.get("plan")
+    used, limit = info["chats_used"], info.get("chat_limit")
+    status = ('<s-badge tone="success">Active</s-badge>' if info["active"]
+              else '<s-badge tone="critical">Paused</s-badge>')
+    box = lambda inner: f'<s-box padding="base" border="base" borderRadius="base"><s-stack gap="small-200">{inner}</s-stack></s-box>'
+    cards = (
+        '<s-grid gridTemplateColumns="repeat(auto-fit, minmax(200px, 1fr))" gap="base">'
+        + box(f'<s-text color="subdued">Assistant</s-text><s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(values.get("assistant_name") or "Assistant")}</s-heading>{status}</s-stack>')
+        + box(f'<s-text color="subdued">Chats this month</s-text><s-heading>{used:,}{f" of {limit:,}" if limit else ""}</s-heading>')
+        + box(f'<s-text color="subdued">Plan</s-text><s-heading>{html.escape(plan["name"] if plan else "No plan yet")}</s-heading>'
+              f'<s-link href="{APP_BASE}/plan">See plan and usage</s-link>')
+        + '</s-grid>')
+    links = "".join(
+        box(f'<s-heading>{html.escape(label)}</s-heading><s-paragraph color="subdued">{html.escape(_PAGE_HELP[key])}</s-paragraph>'
+            f'<s-link href="{APP_BASE}/{key}">Open {html.escape(label.lower())}</s-link>')
+        for key, label, _ in _APP_PAGES)
+    body = (
+        cards
+        + f'<s-banner heading="Switch the assistant on in your theme" tone="info"><s-stack gap="small-200">'
+          f'<s-paragraph>Connected to {html.escape(shop)}. Turn on Pepa Assistant under App embeds once; set everything else here in the app.</s-paragraph>'
+          f'<s-stack direction="inline"><s-button href="{_attr(editor)}" target="_top">Open the theme editor</s-button></s-stack></s-stack></s-banner>'
+        + f'<s-section heading="Set up your assistant"><s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">{links}</s-grid></s-section>')
+    return _shell(shop, values.get("assistant_name") or "Pepa Assistant", body)
+
+
+def _form_page(shop: str, key: str, title: str, groups: list[str], values: dict) -> HTMLResponse:
+    fields_in = [f for f in widget_settings.FIELDS if f["group"] in groups]
+    sections = []
+    for group in groups:
+        fields = "".join(_field(f, values.get(f["id"])) for f in fields_in if f["group"] == group)
+        layout = (f'<s-grid gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))" gap="base">{fields}</s-grid>'
+                  if group in _GRID_GROUPS else f'<s-stack gap="base">{fields}</s-stack>')
+        sections.append(f'<s-section heading="{_attr(group)}"><s-stack gap="base">'
+                        f'<s-paragraph color="subdued">{html.escape(_GROUP_HELP.get(group, ""))}</s-paragraph>'
+                        f'{layout}</s-stack></s-section>')
+    types = {f["id"]: f["type"] for f in fields_in}
+    body = (f'<s-paragraph color="subdued">{html.escape(_PAGE_HELP[key])} Changes show on your store the next time a page loads.</s-paragraph>'
+            f'<form id="settings" data-save-bar data-discard-confirmation><s-stack gap="base">{"".join(sections)}</s-stack></form>')
+    script = f"""<script>
 const TYPES = {json.dumps(types)};
 const form = document.getElementById('settings');
 document.getElementById('save-top').addEventListener('click', () => form.requestSubmit());
@@ -291,16 +334,40 @@ form.addEventListener('submit', async (event) => {{
   event.preventDefault();
   try {{
     const token = await shopify.idToken();
-    const res = await fetch('app/settings', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify(read()) }});
+    const res = await fetch('{APP_BASE}/settings', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify(read()) }});
     if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
     shopify.toast.show('Settings saved');
   }} catch (error) {{
     shopify.toast.show('Could not save: ' + error.message, {{ isError: true }});
   }}
 }});
-</script>
-</body></html>"""
-    return HTMLResponse(page, headers={"Content-Security-Policy": f"frame-ancestors https://admin.shopify.com https://{shop};"})
+</script>"""
+    return _shell(shop, title, body, script, save=True)
+
+
+def _sign_in_page() -> HTMLResponse:
+    """A page opened from the sidebar comes without the shop's session token:
+    fetch one from App Bridge and load the page again with it."""
+    page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="shopify-api-key" content="{_attr(settings.SHOPIFY_CLIENT_ID)}">
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<title>Pepa Assistant</title></head>
+<body style="font: 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #616161">
+<p id="m">Loading…</p>
+<script>
+(async () => {{
+  try {{
+    const token = await shopify.idToken();
+    const url = new URL(location.href);
+    url.searchParams.set('id_token', token);
+    location.replace(url.toString());
+  }} catch (e) {{
+    document.getElementById('m').textContent = 'Open the app from your Shopify admin (Apps > Pepa AI Chatbot).';
+  }}
+}})();
+</script></body></html>"""
+    return HTMLResponse(page, headers={"Content-Security-Policy": "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"})
 
 
 def _shop_from_bearer(request: Request) -> str:
@@ -345,3 +412,24 @@ async def widget_config() -> JSONResponse:
     return JSONResponse({"settings": shown},
                         headers={"Cache-Control": "public, max-age=60"})
 
+
+@router.get("/shopify/app/{page}", response_class=HTMLResponse, include_in_schema=False)
+async def shopify_app_page(page: str, request: Request) -> HTMLResponse:
+    """Content, Appearance, Behaviour and Plan - the app's pages in the sidebar."""
+    found = next(((key, label, groups) for key, label, groups in _APP_PAGES if key == page), None)
+    if found is None:
+        return _page("<h1>Pepa Assistant</h1><p>That page does not exist.</p>", status=404)
+    id_token = request.query_params.get("id_token")
+    if not id_token:
+        return _sign_in_page()
+    try:
+        shop = await installs.install(id_token)
+    except installs.InstallError as exc:
+        return _page(f'<h1>Pepa Assistant</h1><p class="bad">{html.escape(str(exc))}</p>', status=400)
+    key, label, groups = found
+    if key == "plan":
+        from app.services import billing
+        info = await billing.for_merchant(shop)
+        return _shell(shop, "Plan and billing", _plan_sections(shop, info))
+    values = widget_settings.for_shop(installs.settings_for(shop))
+    return _form_page(shop, key, label, groups, values)
