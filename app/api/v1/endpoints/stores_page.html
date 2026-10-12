@@ -71,6 +71,15 @@ function row(s) {
   PLANS.forEach((p) => plan.add(new Option(`${p.name} (${p.price})`, p.key)));
   plan.value = s.plan || '';
   planTd.append(plan);
+  if (s.subscription && s.subscription.status) {
+    const sub = s.subscription, line = document.createElement('div');
+    const words = { active: sub.cancel_at_period_end ? 'Auto-renew off, ends ' + sub.period_end : 'Auto-renews ' + sub.period_end,
+                    trialing: 'Trial until ' + sub.period_end, past_due: 'Payment failed, Stripe retrying',
+                    canceled: 'Subscription cancelled', unpaid: 'Unpaid', incomplete: 'Checkout not finished' };
+    line.textContent = 'Stripe: ' + (words[sub.status] || sub.status) + (sub.months ? ' · every ' + sub.months + ' mo' : '');
+    line.style.cssText = 'font-size:12.5px;margin-top:4px;color:' + (sub.status === 'past_due' ? '#d72c0d' : '#6d7175');
+    planTd.append(line);
+  }
   if (s.requested && s.requested.plan) {
     const asked = PLANS.find((p) => p.key === s.requested.plan);
     const req = document.createElement('div');

@@ -75,6 +75,9 @@ async def lifespan(app: FastAPI):
     # Shops that installed the app, saved by their installs.
     from app.services import installs, shops
     await installs.load()
+    # Several copies of this server can run side by side: each re-reads the shops
+    # every 30 s so billing and settings saved by one reach the others.
+    asyncio.create_task(installs.keep_fresh())
     # Every shop this backend serves, so a newly added shop's first question
     # does not wait for its whole catalogue to be read.
     for shop in sorted(shops.allowed()):

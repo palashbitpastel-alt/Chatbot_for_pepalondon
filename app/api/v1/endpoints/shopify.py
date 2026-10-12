@@ -201,6 +201,14 @@ def _asked_heading(name: str, req: dict) -> str:
     return f"You asked for the {name} plan for {period}" + (f" ({_money(float(total))})" if total else "")
 
 
+_LIVE = ("active", "trialing", "past_due")
+
+
+def _renewing(info: dict) -> bool:
+    sub = info.get("subscription") or {}
+    return sub.get("status") in ("active", "trialing") and not sub.get("cancel_at_period_end")
+
+
 def _change_note(change: dict) -> dict:
     """The quote plus one line on what paying does to the dates."""
     kind, ends = change.get("kind"), _nice_date(change.get("ends") or "")
@@ -234,9 +242,17 @@ def _plan_sections(shop: str, info: dict) -> str:
         banners.append(("critical", f"Your plan ended on {ended}",
                         f"The assistant keeps running until {_nice_date(info.get('grace_until') or '')}, then pauses. "
                         "Renew now to avoid a break."))
-    elif days is not None and days <= 7:
+    elif days is not None and days <= 7 and not _renewing(info):
         banners.append(("warning", "Your plan ends today" if days == 0 else f"Your plan ends in {days} day{'s' if days != 1 else ''}",
                         "Renew below before then to keep the assistant running without a break."))
+    sub = info.get("subscription") or {}
+    if sub.get("status") == "past_due":
+        banners.insert(0, ("critical", "Your last payment didn't go through",
+                           "Stripe will try again over the next few days. Update your card in Manage billing "
+                           "to keep the assistant running."))
+    elif sub.get("status") in _LIVE and sub.get("cancel_at_period_end"):
+        banners.append(("info", "Auto-renew is off",
+                        f"Your plan ends on {_nice_date(sub.get('period_end') or '')}. Turn auto-renew back on to keep it."))
     if info.get("running") and pct is not None and pct >= 100:
         banners.append(("critical", "You have used all of this month's chats",
                         "New conversations are paused until next month. Upgrade to continue now."))
@@ -254,12 +270,24 @@ def _plan_sections(shop: str, info: dict) -> str:
     usage = f"{used:,} of {limit:,}" if limit else f"{used:,}"
     bar = (f'<div class="pa-meter" role="img" aria-label="{pct}% used"><div style="width:{pct}%"'
            f'{" class=hot" if pct >= 80 else ""}></div></div>') if pct is not None else '<s-text color="subdued">No monthly limit</s-text>'
+    renew_line = ""
+    if _renewing(info):
+        renew_line = f'<s-badge tone="success">Auto-renews on {html.escape(_nice_date(sub.get("period_end") or ""))}</s-badge>'
+    elif sub.get("status") in _LIVE:
+        renew_line = '<s-badge>Auto-renew off</s-badge>'
     paid = (f'<s-heading>{html.escape(_time_left(days))}</s-heading>'
             f'{_time_bar(info)}'
             f'<s-text color="subdued">{html.escape(("Ended " if days is not None and days < 0 else "Until ") + _nice_date(info["paid_until"]))}</s-text>'
+            f'{renew_line}'
             ) if info.get("paid_until") else '<s-heading>–</s-heading><s-text color="subdued">Not set yet</s-text>'
     box = lambda inner: f'<s-box padding="base" border="base" borderRadius="base"><s-stack gap="small-200">{inner}</s-stack></s-box>'
     actions = []
+    if sub.get("customer"):
+        actions.append('<s-button data-portal>Manage billing</s-button>')
+    if sub.get("status") in _LIVE:
+        on = not sub.get("cancel_at_period_end")
+        actions.append(f'<s-button data-renew="{"0" if on else "1"}"{"" if on else " variant=\"primary\""}>'
+                       f'{"Turn off auto-renew" if on else "Turn on auto-renew"}</s-button>')
     if pay:
         actions.append(f'<s-button variant="primary" href="{_attr(pay)}" target="_blank">Pay or renew</s-button>')
     if contact:
@@ -286,6 +314,9 @@ def _plan_sections(shop: str, info: dict) -> str:
         current = plan is not None and p.get("key") == plan.get("key")
         better = plan is None or (p.get("chats") or 0) > (plan.get("chats") or 0)
         label = "Renew" if current else "Upgrade" if better and plan else "Choose" if not plan else "Switch"
+        live_sub = sub.get("status") in _LIVE
+        if live_sub:
+            label = "Switch period" if p.get("key") == sub.get("plan") else ("Upgrade" if better else "Switch")
         if p.get("key") == requested:
             button = '<s-badge tone="warning">Requested</s-badge>'
         else:
@@ -298,6 +329,16 @@ def _plan_sections(shop: str, info: dict) -> str:
                    for q in info.get("periods") or []} if p.get("monthly") else {})
         pays = {str(k): v for k, v in (p.get("payment_urls") or {}).items()} if isinstance(p.get("payment_urls"), dict) else {}
         button = button.replace("<s-button data-plan=", f"<s-button data-pays=\"{_attr(json.dumps(pays))}\" data-plan=", 1)
+        if live_sub:
+            button = button.replace("<s-button data-pays=", '<s-button data-confirm="' + _attr(
+                "Switch now? Stripe credits the unused part of your current plan and charges the difference "
+                "to your card today.") + '" data-pays=', 1)
+        if info.get("billing_mode") == "stripe":
+            for m, q in quotes.items():
+                every = "month" if m == "1" else f"{m} months"
+                q["note"] = (f"Switching: Stripe credits your unused time and charges the difference today. "
+                             f"Then renews every {every}." if live_sub else
+                             f"Renews automatically every {every}. Turn off any time.")
         cards.append(box(
             f'<s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(str(p.get("name")))}</s-heading>'
             f'{"<s-badge tone=\"info\">Current plan</s-badge>" if current else ""}</s-stack>'
@@ -458,13 +499,38 @@ function showPrices() {{
   }});
 }}
 if (periodSelect) periodSelect.addEventListener('change', showPrices);
+async function post(path, body) {{
+  const token = await shopify.idToken();
+  const res = await fetch('{APP_BASE}/' + path, {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify(body || {{}}) }});
+  const data = await res.json().catch(() => ({{}}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}}
+document.querySelectorAll('[data-portal]').forEach((button) => button.addEventListener('click', async () => {{
+  button.setAttribute('loading', '');
+  try {{ window.open((await post('billing-portal')).url, '_top'); }}
+  catch (error) {{ button.removeAttribute('loading'); shopify.toast.show(error.message, {{ isError: true }}); }}
+}}));
+document.querySelectorAll('[data-renew]').forEach((button) => button.addEventListener('click', async () => {{
+  const on = button.dataset.renew === '1';
+  if (!on && !confirm('Turn off auto-renew? Your plan keeps running until the end of the period you have paid for, then stops.')) return;
+  button.setAttribute('loading', '');
+  try {{ await post('auto-renew', {{ on }}); shopify.toast.show(on ? 'Auto-renew is on' : 'Auto-renew is off'); setTimeout(() => location.reload(), 900); }}
+  catch (error) {{ button.removeAttribute('loading'); shopify.toast.show(error.message, {{ isError: true }}); }}
+}}));
 document.querySelectorAll('[data-plan]').forEach((button) => button.addEventListener('click', async () => {{
+  if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
   button.setAttribute('loading', '');
   try {{
     const token = await shopify.idToken();
     const res = await fetch('{APP_BASE}/plan-request', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify({{ plan: button.dataset.plan, months: months() }}) }});
     if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
     const data = await res.json();
+    if (data.changed) {{
+      shopify.toast.show('Plan switched');
+      setTimeout(() => location.reload(), 900);
+      return;
+    }}
     if (data.checkout_url) {{
       // The payment page, at the top of the window (Stripe and Razorpay will not run in a frame).
       window.open(data.checkout_url, '_top');
@@ -602,6 +668,16 @@ async def plan_request(request: Request) -> JSONResponse:
     if not billing.plan_named(key):
         return JSONResponse({"detail": "Unknown plan"}, status_code=400)
     from app.services import payments
+    if payments.provider() == "stripe":
+        from app.services import stripe_subscriptions as subs
+        if subs.is_live(shop):
+            # Already subscribed: switch the same subscription (Stripe prorates).
+            try:
+                result = await subs.change(shop, billing.plan_named(key), months if months in billing.discounts() else 1)
+            except subs.StripeError as exc:
+                return JSONResponse({"detail": str(exc)}, status_code=400)
+            logger.info("%s switched to the %s plan, %s months", shop, key, months)
+            return JSONResponse({"shop": shop, **result})
     if payments.provider():
         # Paying online: nothing is recorded until the payment arrives, so a
         # closed checkout leaves the page as it was.
@@ -615,6 +691,41 @@ async def plan_request(request: Request) -> JSONResponse:
     asked = await billing.request_plan(shop, key, months)
     logger.info("%s asked for the %s plan", shop, asked["plan"])
     return JSONResponse({"shop": shop, "requested": asked})
+
+
+async def _stripe_action(request: Request, act) -> JSONResponse:
+    try:
+        shop = _shop_from_bearer(request)
+    except installs.InstallError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=401)
+    from app.services import stripe_subscriptions as subs, payments
+    if payments.provider() != "stripe":
+        return JSONResponse({"detail": "Online billing is not switched on."}, status_code=400)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    try:
+        return JSONResponse({"shop": shop, **(await act(subs, shop, body or {}, payments.back_to_app(shop)))})
+    except subs.StripeError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
+@router.post("/shopify/app/billing-portal", include_in_schema=False)
+async def billing_portal(request: Request) -> JSONResponse:
+    """Stripe's customer portal: card, invoices, cancel."""
+    async def act(subs, shop, body, back):
+        return {"url": await subs.portal(shop, back)}
+    return await _stripe_action(request, act)
+
+
+@router.post("/shopify/app/auto-renew", include_in_schema=False)
+async def auto_renew(request: Request) -> JSONResponse:
+    """Turn the plan's automatic renewal off or back on."""
+    async def act(subs, shop, body, back):
+        current = await subs.set_auto_renew(shop, bool(body.get("on")))
+        return {"auto_renew": not current.get("cancel_at_period_end")}
+    return await _stripe_action(request, act)
 
 
 @router.get("/shopify/app/{page}", response_class=HTMLResponse, include_in_schema=False)
@@ -637,6 +748,10 @@ async def shopify_app_page(page: str, request: Request) -> HTMLResponse:
         from app.services import payments
         if payments.provider():
             info["requested"] = None   # online payment: a request waits on no one
+        if payments.provider() == "stripe":
+            from app.services import stripe_subscriptions as subs
+            info["billing_mode"] = "stripe"
+            info["subscription"] = subs.state(shop) if subs.state(shop).get("subscription") else None
         body = _plan_sections(shop, info) + _history_section(payments.history_for(shop))
         if request.query_params.get("paid"):
             body = ('<s-banner heading="Thank you - payment received" tone="success"><s-paragraph>'

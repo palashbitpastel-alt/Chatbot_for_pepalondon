@@ -197,7 +197,9 @@ async def overview() -> list[dict]:
         custom = (installs.settings_for(shop).get(KEY) or {}).get("chat_limit")
         out.append({"shop": shop, "installed": shop in installs.installed() or shop == shops.default(),
                     **plan_for(shop), "custom_limit": custom if isinstance(custom, int) and custom > 0 else None,
-                    "chats_this_month": await chats_this_month(shop)})
+                    "chats_this_month": await chats_this_month(shop),
+                    "subscription": {k: v for k, v in (installs.settings_for(shop).get("_stripe") or {}).items()
+                                     if k in ("status", "cancel_at_period_end", "period_end", "months")} or None})
     return out
 
 

@@ -76,26 +76,14 @@ async def checkout(shop: str, plan_key: str, months: int) -> str | None:
                             "label": _label(plan, months), "ref": "test_" + secrets.token_hex(6)})
         # Relative: the Plan page (served by this backend) opens it on our own host.
         return f"/api/v1/payments/demo?t={token}"
+    if which == "stripe":
+        from app.services import stripe_subscriptions
+        try:
+            return await stripe_subscriptions.checkout(shop, plan, months, back)
+        except stripe_subscriptions.StripeError as exc:
+            raise PaymentError(f"The payment page could not be opened: {exc}") from exc
     try:
         async with httpx.AsyncClient(timeout=30) as c:
-            if which == "stripe":
-                form = {
-                    "mode": "payment",
-                    "success_url": back + "?paid=1",
-                    "cancel_url": back,
-                    "client_reference_id": notes["shop"],
-                    # Name and address: required for Indian Stripe accounts' export payments, useful on invoices.
-                    "billing_address_collection": "required",
-                    "line_items[0][quantity]": "1",
-                    "line_items[0][price_data][currency]": currency.lower(),
-                    "line_items[0][price_data][unit_amount]": str(amount),
-                    "line_items[0][price_data][product_data][name]": "Pepa Assistant - " + _label(plan, months),
-                    **{f"metadata[{k}]": v for k, v in notes.items()},
-                }
-                response = await c.post("https://api.stripe.com/v1/checkout/sessions", data=form,
-                                        headers={"Authorization": f"Bearer {settings.STRIPE_SECRET_KEY}"})
-                response.raise_for_status()
-                return response.json()["url"]
             response = await c.post(
                 "https://api.razorpay.com/v1/payment_links",
                 auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
@@ -179,6 +167,8 @@ def paid_order(provider_name: str, event: dict) -> dict | None:
             if event.get("type") != "checkout.session.completed":
                 return None
             obj = event["data"]["object"]
+            if obj.get("mode") != "payment":
+                return None   # subscriptions are handled in stripe_subscriptions
             if obj.get("payment_status") != "paid":
                 return None
             meta, amount, currency, ref = obj.get("metadata") or {}, obj.get("amount_total"), obj.get("currency"), obj.get("id")
@@ -196,18 +186,31 @@ def paid_order(provider_name: str, event: dict) -> dict | None:
             "provider": provider_name}
 
 
+def _recorded(shop: str, reference: str) -> bool:
+    return any(p.get("reference") == reference for p in installs.settings_for(shop).get(PAYMENTS_KEY) or [])
+
+
+async def record(shop: str, payment: dict) -> bool:
+    """Add a payment to the shop's billing history (newest first, last 50).
+    One already there (the provider retrying) is not added twice."""
+    shop = shops.normalise(shop)
+    if _recorded(shop, payment["reference"]):
+        return False
+    history = [{"on": date.today().isoformat(), **payment}] + list(installs.settings_for(shop).get(PAYMENTS_KEY) or [])
+    await installs.save_private(shop, PAYMENTS_KEY, history[:50])
+    return True
+
+
 async def activate(order: dict) -> bool:
-    """Switch the paid plan on and keep the payment in the shop's history.
-    A payment already recorded (the provider retrying) changes nothing."""
+    """A one-off payment (Razorpay, test checkout): switch the paid plan on and
+    keep the payment. A payment already recorded changes nothing."""
     shop = order["shop"]
-    history = list(installs.settings_for(shop).get(PAYMENTS_KEY) or [])
-    if any(p.get("reference") == order["reference"] for p in history):
+    if _recorded(shop, order["reference"]):
         return False
     plan = await billing.apply_paid_plan(shop, order["plan"], order["months"])
-    history.insert(0, {"on": date.today().isoformat(), "plan": order["plan"], "months": order["months"],
-                       "amount": order["amount"], "currency": order["currency"], "reference": order["reference"],
-                       "provider": order["provider"], "paid_until": plan.get("paid_until")})
-    await installs.save_private(shop, PAYMENTS_KEY, history[:50])
+    await record(shop, {"plan": order["plan"], "months": order["months"], "amount": order["amount"],
+                        "currency": order["currency"], "reference": order["reference"],
+                        "provider": order["provider"], "paid_until": plan.get("paid_until")})
     logger.info("Payment %s activated %s on %s until %s", order["reference"], order["plan"], shop, plan.get("paid_until"))
     return True
 

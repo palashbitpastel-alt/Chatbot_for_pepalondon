@@ -118,7 +118,7 @@ async def ensure_signing_secret(shop: str) -> None:
     finally:
         shops._current.reset(reset)
     async with AsyncSessionLocal() as db:
-        row = await db.get(Shop, shop)
+        row = await db.get(Shop, shop, with_for_update=True)
         if row is None:
             row = Shop(domain=shop)
             db.add(row)
@@ -129,7 +129,7 @@ async def ensure_signing_secret(shop: str) -> None:
     logger.info("Published the sign-in secret for %s", shop)
 
 
-async def load() -> None:
+async def load(quiet: bool = False) -> None:
     """Read every installed shop into memory (at startup)."""
     try:
         async with AsyncSessionLocal() as db:
@@ -138,9 +138,20 @@ async def load() -> None:
         for row in rows:
             _installed[row.domain] = {"token": _open(row.access_token), "scopes": row.scopes or "",
                                       "settings": row.settings or {}}
-        logger.info("Installed shops: %s", sorted(installed()))
+        if not quiet:
+            logger.info("Installed shops: %s", sorted(installed()))
     except Exception:  # noqa: BLE001 - the listed shops still work without it
         logger.warning("Could not read the installed shops", exc_info=True)
+
+
+async def keep_fresh(every: float = 30) -> None:
+    """Re-read the shops every few seconds, so a change saved by another copy
+    of this server (a payment webhook, a settings save) reaches this one too.
+    One small query per interval, whatever the number of shops."""
+    import asyncio
+    while True:
+        await asyncio.sleep(every)
+        await load(quiet=True)
 
 
 # ── Install ────────────────────────────────────────────────────────────────
@@ -198,7 +209,7 @@ async def exchange(shop: str, id_token: str) -> tuple[str, str]:
 
 async def save(shop: str, token: str, scopes: str) -> None:
     async with AsyncSessionLocal() as db:
-        row = await db.get(Shop, shop)
+        row = await db.get(Shop, shop, with_for_update=True)
         if row is None:
             row = Shop(domain=shop)
             db.add(row)
@@ -241,7 +252,7 @@ async def save_settings(shop: str, values: dict) -> dict:
     shop = shops.normalise(shop)
     merged = {**settings_for(shop), **widget_settings.clean(values)}
     async with AsyncSessionLocal() as db:
-        row = await db.get(Shop, shop)
+        row = await db.get(Shop, shop, with_for_update=True)
         if row is None:
             row = Shop(domain=shop)
             db.add(row)
@@ -256,7 +267,7 @@ async def save_private(shop: str, key: str, value) -> dict:
     storefront never see (keys start with "_"): the sign-in secret, billing."""
     shop = shops.normalise(shop)
     async with AsyncSessionLocal() as db:
-        row = await db.get(Shop, shop)
+        row = await db.get(Shop, shop, with_for_update=True)
         if row is None:
             row = Shop(domain=shop)
             db.add(row)
@@ -275,7 +286,7 @@ def known() -> set[str]:
 async def uninstall(shop: str) -> None:
     shop = shops.normalise(shop)
     async with AsyncSessionLocal() as db:
-        row = await db.get(Shop, shop)
+        row = await db.get(Shop, shop, with_for_update=True)
         if row is not None:
             row.access_token = None
             row.uninstalled_at = datetime.utcnow()
@@ -288,7 +299,7 @@ async def forget(shop: str) -> None:
     """shop/redact: everything about the shop goes, 48 hours after uninstall."""
     shop = shops.normalise(shop)
     async with AsyncSessionLocal() as db:
-        row = await db.get(Shop, shop)
+        row = await db.get(Shop, shop, with_for_update=True)
         if row is not None:
             await db.delete(row)
             await db.commit()

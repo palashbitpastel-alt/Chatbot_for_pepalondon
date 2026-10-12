@@ -1,6 +1,7 @@
 """Payment providers tell us a plan was paid for.
 
-POST /payments/stripe     Stripe webhook (checkout.session.completed)
+POST /payments/stripe     Stripe webhook: checkout.session.completed, invoice.paid,
+                          invoice.payment_failed, customer.subscription.updated/.deleted
 POST /payments/razorpay   Razorpay webhook (payment_link.paid)
 GET/POST /payments/demo   our test checkout (PAYMENT_PROVIDER=demo only)
 
@@ -28,6 +29,13 @@ async def _handle(name: str, request: Request, header: str) -> JSONResponse:
     event = verify(body, request.headers.get(header))
     if event is None:
         return JSONResponse({"detail": "Invalid signature"}, status_code=400)
+    if name == "stripe":
+        from app.services import stripe_subscriptions
+        try:
+            await stripe_subscriptions.handle(event)
+        except stripe_subscriptions.StripeError:
+            # Stripe sends the event again later; by then the read usually works.
+            return JSONResponse({"detail": "Could not read the subscription"}, status_code=503)
     order = payments.paid_order(name, event)
     if order:
         await payments.activate(order)
