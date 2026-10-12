@@ -433,6 +433,12 @@ document.querySelectorAll('[data-plan]').forEach((button) => button.addEventList
     const token = await shopify.idToken();
     const res = await fetch('{APP_BASE}/plan-request', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify({{ plan: button.dataset.plan, months: months() }}) }});
     if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
+    const data = await res.json();
+    if (data.checkout_url) {{
+      // The payment page, at the top of the window (Stripe and Razorpay will not run in a frame).
+      window.open(data.checkout_url, '_top');
+      return;
+    }}
     const pay = JSON.parse(button.dataset.pays || '{{}}')[String(months())] || button.dataset.pay;
     if (pay) window.open(pay, '_blank');
     shopify.toast.show('Plan request sent');
@@ -443,6 +449,38 @@ document.querySelectorAll('[data-plan]').forEach((button) => button.addEventList
   }}
 }}));
 </script>"""
+
+
+def _amount(payment: dict) -> str:
+    amount = float(payment.get("amount") or 0)
+    return f"{amount:,.2f} {payment.get('currency') or ''}".strip()
+
+
+def _history_section(history: list[dict]) -> str:
+    """Billing history: every payment, newest first."""
+    if not history:
+        return ""
+    rows = "".join(
+        "<s-table-row>"
+        f"<s-table-cell>{html.escape(_nice_date(str(p.get('on') or '')))}</s-table-cell>"
+        f"<s-table-cell>{html.escape(str((billing_plan_name(p.get('plan')))))}</s-table-cell>"
+        f"<s-table-cell>{html.escape('1 month' if int(p.get('months') or 1) == 1 else str(p.get('months')) + ' months')}</s-table-cell>"
+        f"<s-table-cell>{html.escape(_amount(p))}</s-table-cell>"
+        f"<s-table-cell>{html.escape(_nice_date(str(p.get('paid_until') or '')))}</s-table-cell>"
+        f"<s-table-cell>{html.escape(str(p.get('reference') or ''))}</s-table-cell>"
+        "</s-table-row>"
+        for p in history)
+    return ('<s-section heading="Billing history"><s-table><s-table-header-row>'
+            '<s-table-header listSlot="primary">Date</s-table-header><s-table-header>Plan</s-table-header>'
+            '<s-table-header>Period</s-table-header><s-table-header format="currency">Amount</s-table-header>'
+            '<s-table-header>Paid until</s-table-header><s-table-header>Reference</s-table-header>'
+            f'</s-table-header-row><s-table-body>{rows}</s-table-body></s-table></s-section>')
+
+
+def billing_plan_name(key) -> str:
+    from app.services import billing
+    plan = billing.plan_named(key)
+    return plan["name"] if plan else str(key or "")
 
 
 def _sign_in_page() -> HTMLResponse:
@@ -533,7 +571,12 @@ async def plan_request(request: Request) -> JSONResponse:
     if asked is None:
         return JSONResponse({"detail": "Unknown plan"}, status_code=400)
     logger.info("%s asked for the %s plan", shop, asked["plan"])
-    return JSONResponse({"shop": shop, "requested": asked})
+    from app.services import payments
+    try:
+        url = await payments.checkout(shop, asked["plan"], asked["months"])
+    except payments.PaymentError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+    return JSONResponse({"shop": shop, "requested": asked, "checkout_url": url})
 
 
 @router.get("/shopify/app/{page}", response_class=HTMLResponse, include_in_schema=False)
@@ -553,6 +596,12 @@ async def shopify_app_page(page: str, request: Request) -> HTMLResponse:
     if key == "plan":
         from app.services import billing
         info = await billing.for_merchant(shop)
-        return _shell(shop, "Plan and billing", _plan_sections(shop, info), _PLAN_SCRIPT)
+        from app.services import payments
+        body = _plan_sections(shop, info) + _history_section(payments.history_for(shop))
+        if request.query_params.get("paid"):
+            body = ('<s-banner heading="Thank you - payment received" tone="success"><s-paragraph>'
+                    'Your plan is switched on as soon as the payment is confirmed, usually within a minute. '
+                    'Refresh this page if it does not show yet.</s-paragraph></s-banner>') + body
+        return _shell(shop, "Plan and billing", body, _PLAN_SCRIPT)
     values = widget_settings.for_shop(installs.settings_for(shop))
     return _form_page(shop, key, label, groups, values)

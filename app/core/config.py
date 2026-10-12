@@ -154,6 +154,18 @@ class Settings(BaseSettings):
     SUPPORT_CONTACT_EMAIL: str = ""
     # Saving per billing period, percent: {"1": 0, "3": 5, "6": 10, "12": 20}.
     SUPPORT_PERIOD_DISCOUNTS: str = ""
+    # Taking payment for plans (see services/payments). Set one provider's keys;
+    # PAYMENT_PROVIDER ("stripe" or "razorpay") picks one when both are set.
+    PAYMENT_PROVIDER: str = ""
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+    BILLING_CURRENCY: str = "USD"
+    # The app's handle in the Shopify admin URL (admin.shopify.com/store/<s>/apps/<handle>),
+    # where a merchant comes back to after paying.
+    SHOPIFY_APP_HANDLE: str = "pepa-ai-chatbot"
     SHOPIFY_ACCESS_TOKEN: str = ""
     # Storefront API token for Shopify's own search (see services/shopify_search).
     # Optional: without it the app tries to make one, then uses the Admin search.
