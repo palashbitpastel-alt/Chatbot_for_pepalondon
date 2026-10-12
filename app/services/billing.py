@@ -27,6 +27,7 @@ from app.db.session import AsyncSessionLocal
 from app.services import installs, shops
 
 KEY = "_billing"
+MERCHANT_PAUSE_KEY = "_merchant_paused"
 
 # The plans merchants see on the app's page. SUPPORT_PLANS (a JSON list in the
 # same shape) replaces these without a code change. payment_url: a Stripe or
@@ -107,7 +108,9 @@ def plan_for(shop: str) -> dict:
     return {
         "active": active,                    # our on/off switch
         "lapsed": lapsed,                    # paid time and grace days are over
-        "running": active and not lapsed,    # what the storefront actually gets
+        # The merchant's own pause switch in the app (kept apart from billing).
+        "merchant_paused": bool(installs.settings_for(shop).get(MERCHANT_PAUSE_KEY)),
+        "running": active and not lapsed and not installs.settings_for(shop).get(MERCHANT_PAUSE_KEY),
         "grace_until": grace_until,
         "plan": chosen["key"] if chosen else None,
         "chat_limit": int(limit) if isinstance(limit, int) and limit > 0 else None,
@@ -153,6 +156,8 @@ async def refusal(shop: str, session_id: str) -> tuple[str, str] | None:
     """(code, shopper message) when this shop may not chat now, else None."""
     plan = plan_for(shop)
     if not plan["running"]:
+        if plan["merchant_paused"] and plan["active"] and not plan["lapsed"]:
+            return "merchant_paused", PAUSED_MESSAGE
         return ("expired" if plan["active"] else "paused"), PAUSED_MESSAGE
     if plan["chat_limit"] and not await _started_this_month(shop, session_id):
         if await chats_this_month(shop) >= plan["chat_limit"]:
@@ -223,6 +228,7 @@ async def for_merchant(shop: str) -> dict:
     return {
         "active": plan["active"],
         "lapsed": plan["lapsed"],
+        "merchant_paused": plan["merchant_paused"],
         "running": plan["running"],
         "grace_until": plan["grace_until"],
         "plan": chosen,

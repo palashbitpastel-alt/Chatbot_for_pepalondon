@@ -406,11 +406,16 @@ def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse
     plan = info.get("plan")
     used, limit = info["chats_used"], info.get("chat_limit")
     status = ('<s-badge tone="success">Active</s-badge>' if info.get("running", info["active"])
+              else '<s-badge tone="warning">Paused by you</s-badge>' if info.get("merchant_paused")
               else '<s-badge tone="critical">Paused</s-badge>')
+    paused_by_you = info.get("merchant_paused")
+    switch = (f'<s-button data-assistant="{"1" if paused_by_you else "0"}"{" variant=\"primary\"" if paused_by_you else ""}>'
+              f'{"Turn on assistant" if paused_by_you else "Pause assistant"}</s-button>')
     box = lambda inner: f'<s-box padding="base" border="base" borderRadius="base"><s-stack gap="small-200">{inner}</s-stack></s-box>'
     cards = (
         '<s-grid gridTemplateColumns="repeat(auto-fit, minmax(200px, 1fr))" gap="base">'
-        + box(f'<s-text color="subdued">Assistant</s-text><s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(values.get("assistant_name") or "Assistant")}</s-heading>{status}</s-stack>')
+        + box(f'<s-text color="subdued">Assistant</s-text><s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(values.get("assistant_name") or "Assistant")}</s-heading>{status}</s-stack>'
+              f'<s-stack direction="inline">{switch}</s-stack>')
         + box(f'<s-text color="subdued">Chats this month</s-text><s-heading>{used:,}{f" of {limit:,}" if limit else ""}</s-heading>')
         + box(f'<s-text color="subdued">Plan</s-text><s-heading>{html.escape(plan["name"] if plan else "No plan yet")}</s-heading>'
               + (f'<s-text>{html.escape(_time_left(info.get("days_left")))}</s-text>{_time_bar(info)}' if info.get("paid_until") else "")
@@ -422,6 +427,10 @@ def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse
         for key, label, _ in _APP_PAGES)
     alert = ""
     days = info.get("days_left")
+    if paused_by_you:
+        alert = ('<s-banner heading="The assistant is paused" tone="warning"><s-paragraph>'
+                 'You paused it: shoppers don\'t see the chat on your store. Your plan is not affected. '
+                 'Turn it on again whenever you like.</s-paragraph></s-banner>')
     if info.get("lapsed") or (info["active"] and days is not None and days < 0):
         heading = ("The assistant is paused: your plan has ended" if info.get("lapsed")
                    else f"Your plan has ended - the assistant pauses after {_nice_date(info.get('grace_until') or '')}")
@@ -434,7 +443,7 @@ def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse
           f'<s-paragraph>Connected to {html.escape(shop)}. Turn on Pepa Assistant under App embeds once; set everything else here in the app.</s-paragraph>'
           f'<s-stack direction="inline"><s-button href="{_attr(editor)}" target="_top">Open the theme editor</s-button></s-stack></s-stack></s-banner>'
         + f'<s-section heading="Set up your assistant"><s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">{links}</s-grid></s-section>')
-    return _shell(shop, values.get("assistant_name") or "Pepa Assistant", body)
+    return _shell(shop, values.get("assistant_name") or "Pepa Assistant", body, _ASSISTANT_SCRIPT)
 
 
 def _form_page(shop: str, key: str, title: str, groups: list[str], values: dict) -> HTMLResponse:
@@ -580,6 +589,25 @@ def billing_plan_name(key) -> str:
     return plan["name"] if plan else str(key or "")
 
 
+# Pause / turn on the assistant from the Home page.
+_ASSISTANT_SCRIPT = f"""<script>
+document.querySelectorAll('[data-assistant]').forEach((button) => button.addEventListener('click', async () => {{
+  const on = button.dataset.assistant === '1';
+  if (!on && !confirm('Pause the assistant? The chat disappears from your store until you turn it on again. Your plan is not affected.')) return;
+  button.setAttribute('loading', '');
+  try {{
+    const res = await fetch('{APP_BASE}/assistant', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + (await shopify.idToken()), 'Content-Type': 'application/json' }}, body: JSON.stringify({{ on }}) }});
+    if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
+    shopify.toast.show(on ? 'Assistant turned on' : 'Assistant paused');
+    setTimeout(() => location.reload(), 900);
+  }} catch (error) {{
+    button.removeAttribute('loading');
+    shopify.toast.show('Could not change it: ' + error.message, {{ isError: true }});
+  }}
+}}));
+</script>"""
+
+
 def _sign_in_page() -> HTMLResponse:
     """A page opened from the sidebar comes without the shop's session token:
     fetch one from App Bridge and load the page again with it."""
@@ -709,6 +737,24 @@ async def _stripe_action(request: Request, act) -> JSONResponse:
         return JSONResponse({"shop": shop, **(await act(subs, shop, body or {}, payments.back_to_app(shop)))})
     except subs.StripeError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
+@router.post("/shopify/app/assistant", include_in_schema=False)
+async def assistant_switch(request: Request) -> JSONResponse:
+    """The merchant pauses or turns on the assistant on their store."""
+    try:
+        shop = _shop_from_bearer(request)
+    except installs.InstallError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=401)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    from app.services import billing
+    on = bool((body or {}).get("on"))
+    await installs.save_private(shop, billing.MERCHANT_PAUSE_KEY, not on)
+    logger.info("%s %s the assistant", shop, "turned on" if on else "paused")
+    return JSONResponse({"shop": shop, "on": on, "running": billing.plan_for(shop)["running"]})
 
 
 @router.post("/shopify/app/billing-portal", include_in_schema=False)
