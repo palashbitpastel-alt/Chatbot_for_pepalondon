@@ -69,7 +69,15 @@ function row(s) {
   plan.add(new Option('No plan', ''));
   PLANS.forEach((p) => plan.add(new Option(`${p.name} (${p.price})`, p.key)));
   plan.value = s.plan || '';
-  planTd.append(plan); tr.append(planTd);
+  planTd.append(plan);
+  if (s.requested && s.requested.plan) {
+    const asked = PLANS.find((p) => p.key === s.requested.plan);
+    const req = document.createElement('div');
+    req.style.cssText = 'font-size:12.5px;color:#b98900;margin-top:4px;font-weight:600';
+    req.textContent = `Requested: ${asked ? asked.name : s.requested.plan} (${s.requested.on})`;
+    planTd.append(req);
+  }
+  tr.append(planTd);
   tr.append(cell(String(s.chats_this_month), 'num'));
   const limTd = document.createElement('td');
   const lim = document.createElement('input'); lim.type = 'number'; lim.min = '0'; lim.placeholder = 'plan';

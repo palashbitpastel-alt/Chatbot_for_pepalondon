@@ -213,13 +213,25 @@ def _plan_sections(shop: str, info: dict) -> str:
         '</s-grid>' +
         (f'<s-stack direction="inline" gap="base">{"".join(actions)}</s-stack>' if actions else '') +
         '</s-stack></s-section>')
+    requested = (info.get("requested") or {}).get("plan")
+    if requested:
+        asked = next((p for p in info.get("plans") or [] if p.get("key") == requested), {})
+        usage_section = usage_section.replace(
+            '<s-section heading="Plan and usage"><s-stack gap="base">',
+            '<s-section heading="Plan and usage"><s-stack gap="base">'
+            f'<s-banner heading="{_attr("You asked for the " + str(asked.get("name", requested)) + " plan")}" tone="info">'
+            f'<s-paragraph>{html.escape("We will confirm it and send you a payment link. Your plan changes once it is paid.")}</s-paragraph></s-banner>', 1)
     cards = []
     for p in info.get("plans") or []:
         current = plan is not None and p.get("key") == plan.get("key")
-        target = p.get("payment_url") or (f'mailto:{contact}?subject=Change plan to {p.get("name")} - {shop}' if contact else "")
         better = plan is None or (p.get("chats") or 0) > (plan.get("chats") or 0)
-        button = ("" if current or not target else
-                  f'<s-button href="{_attr(target)}" target="_blank"{" variant=\"primary\"" if better else ""}>{"Upgrade" if better and plan else "Choose" if not plan else "Switch"}</s-button>')
+        label = "Upgrade" if better and plan else "Choose" if not plan else "Switch"
+        if p.get("key") == requested:
+            button = '<s-badge tone="warning">Requested</s-badge>'
+        else:
+            button = ("" if current else
+                      f'<s-button data-plan="{_attr(p.get("key"))}" data-pay="{_attr(p.get("payment_url") or pay or "")}"'
+                      f'{" variant=\"primary\"" if better else ""}>{label}</s-button>')
         features = "".join(f"<s-list-item>{html.escape(str(f))}</s-list-item>" for f in p.get("features") or [])
         cards.append(box(
             f'<s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(str(p.get("name")))}</s-heading>'
@@ -345,6 +357,25 @@ form.addEventListener('submit', async (event) => {{
     return _shell(shop, title, body, script, save=True)
 
 
+# A plan button: tell us which plan they want, open its payment link if there is one.
+_PLAN_SCRIPT = f"""<script>
+document.querySelectorAll('[data-plan]').forEach((button) => button.addEventListener('click', async () => {{
+  button.setAttribute('loading', '');
+  try {{
+    const token = await shopify.idToken();
+    const res = await fetch('{APP_BASE}/plan-request', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify({{ plan: button.dataset.plan }}) }});
+    if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
+    if (button.dataset.pay) window.open(button.dataset.pay, '_blank');
+    shopify.toast.show('Plan request sent');
+    setTimeout(() => location.reload(), 900);
+  }} catch (error) {{
+    button.removeAttribute('loading');
+    shopify.toast.show('Could not send: ' + error.message, {{ isError: true }});
+  }}
+}}));
+</script>"""
+
+
 def _sign_in_page() -> HTMLResponse:
     """A page opened from the sidebar comes without the shop's session token:
     fetch one from App Bridge and load the page again with it."""
@@ -413,6 +444,25 @@ async def widget_config() -> JSONResponse:
                         headers={"Cache-Control": "public, max-age=60"})
 
 
+@router.post("/shopify/app/plan-request", include_in_schema=False)
+async def plan_request(request: Request) -> JSONResponse:
+    """The merchant chose a plan on the Plan page."""
+    try:
+        shop = _shop_from_bearer(request)
+    except installs.InstallError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=401)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    from app.services import billing
+    asked = await billing.request_plan(shop, str((body or {}).get("plan") or ""))
+    if asked is None:
+        return JSONResponse({"detail": "Unknown plan"}, status_code=400)
+    logger.info("%s asked for the %s plan", shop, asked["plan"])
+    return JSONResponse({"shop": shop, "requested": asked})
+
+
 @router.get("/shopify/app/{page}", response_class=HTMLResponse, include_in_schema=False)
 async def shopify_app_page(page: str, request: Request) -> HTMLResponse:
     """Content, Appearance, Behaviour and Plan - the app's pages in the sidebar."""
@@ -430,6 +480,6 @@ async def shopify_app_page(page: str, request: Request) -> HTMLResponse:
     if key == "plan":
         from app.services import billing
         info = await billing.for_merchant(shop)
-        return _shell(shop, "Plan and billing", _plan_sections(shop, info))
+        return _shell(shop, "Plan and billing", _plan_sections(shop, info), _PLAN_SCRIPT)
     values = widget_settings.for_shop(installs.settings_for(shop))
     return _form_page(shop, key, label, groups, values)

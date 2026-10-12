@@ -71,6 +71,7 @@ def plan_for(shop: str) -> dict:
         "paid_until": str(saved.get("paid_until") or ""),
         "payment_url": str(saved.get("payment_url") or ""),
         "note": str(saved.get("note") or ""),
+        "requested": saved.get("requested") if isinstance(saved.get("requested"), dict) else None,
     }
 
 
@@ -124,7 +125,9 @@ async def set_plan(shop: str, active: bool, chat_limit: int | None, note: str, p
              "chat_limit": int(chat_limit) if chat_limit and int(chat_limit) > 0 else None,
              "paid_until": paid_until if re.fullmatch(r"\d{4}-\d{2}-\d{2}", paid_until or "") else "",
              "payment_url": payment_url if (payment_url or "").startswith("https://") else "",
-             "note": (note or "")[:300]}
+             "note": (note or "")[:300],
+             # Saving the store's plan answers the merchant's request.
+             "requested": None}
     await installs.save_private(shops.normalise(shop), KEY, value)
     return plan_for(shop)
 
@@ -166,5 +169,18 @@ async def for_merchant(shop: str) -> dict:
         "paid_until": plan["paid_until"],
         "days_left": days_left,
         "payment_url": plan["payment_url"] or (chosen or {}).get("payment_url") or "",
+        "requested": plan["requested"],
         "plans": plans(),
     }
+
+
+async def request_plan(shop: str, key: str) -> dict | None:
+    """The merchant picked a plan in the app: remember it for us to confirm
+    (we switch them once they have paid). None for an unknown plan."""
+    from datetime import date
+    if not plan_named(key):
+        return None
+    saved = dict(installs.settings_for(shop).get(KEY) or {})
+    saved["requested"] = {"plan": key, "on": date.today().isoformat()}
+    await installs.save_private(shops.normalise(shop), KEY, saved)
+    return saved["requested"]
