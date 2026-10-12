@@ -27,7 +27,7 @@ BATCH = 15
 READINGS_KEY = "size_age_readings"
 # Part of every reading's fingerprint: raised when the way pieces are read
 # changes, so the readings kept from before are read again.
-READ_VERSION = 2
+READ_VERSION = 3
 # A shopper's turn never waits longer than this for a first reading; what was
 # not read in time is simply left out, and read on a later turn.
 TIMEOUT_SECONDS = 25
@@ -40,7 +40,8 @@ _ASK = (
     "from the piece itself and your knowledge of children's sizing which ages of "
     "child (in years, decimals for babies) that size fits. Give null for a size no "
     "child wears, and for every size of a piece that is not something a child wears "
-    "in a size (a toy, a gift card, an adult's item).\n\n"
+    "in a size (a toy, a gift card, an adult's item).\n"
+    "The shop's own size chart, for reference (age: height, chest, usual EU shoe size): {chart}\n\n"
     "{pieces}\n\n"
     'Answer with JSON only, keyed by handle and by size number: '
     '{{"<handle>": {{"1": [youngest, oldest] or null, "2": ...}}, ...}}'
@@ -105,6 +106,12 @@ async def _save() -> None:
         logger.warning("Could not keep the size readings", exc_info=True)
 
 
+def _chart() -> str:
+    """The size chart the size finder uses, so both read sizes the same way."""
+    from app.services.size_finder import CHART
+    return "; ".join(f"{b.label}: {b.height_cm}cm, {b.chest_cm}cm, EU {b.shoe_eu}" for b in CHART)
+
+
 def _ages(raw) -> list[float] | None:
     if isinstance(raw, str):
         raw = re.findall(r"\d+(?:\.\d+)?", raw)[:2]
@@ -136,7 +143,7 @@ async def _learn(pieces: list[dict]) -> None:
         try:
             async with gate:
                 answer = await model.ainvoke(
-                    _ASK.format(pieces=lines),
+                    _ASK.format(pieces=lines, chart=_chart()),
                     # Inside a shopper's turn: its own callbacks, or the JSON
                     # would stream to them ahead of their answer.
                     config={"callbacks": [], "tags": ["size_ages"], "run_name": "learn_size_ages"})

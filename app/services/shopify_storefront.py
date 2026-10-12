@@ -1143,6 +1143,8 @@ query SupportSizeScan($query: String!, $first: Int!, $cursor: String, $variants:
 }
 """
 SIZE_SCAN_PAGES = 5
+# Every variant of a piece sized its own way (see _fitting_own_way).
+OWN_WAY_VARIANT_LIMIT = 250
 SIZE_SCAN_PAGE = 50
 
 
@@ -1193,6 +1195,19 @@ async def _fitting_own_way(nodes: list[dict], wanted: tuple[int, int], currency:
         return int(label[:-1]) / (12 if label.endswith("M") else 1)
 
     low, high = years(wanted[0]), years(wanted[1])
+    # The scan reads only the first VARIANT_LIMIT variants of each piece; a
+    # plimsoll in five colours of twenty sizes lost every size past the first
+    # colour's smallest. The few pieces read here are fetched whole.
+    cut = [n["handle"] for n in nodes if len(n["variants"]["nodes"]) >= VARIANT_LIMIT]
+    if cut:
+        joined = " OR ".join(f"handle:{h}" for h in cut)
+        try:
+            whole = (await graphql(SIZE_SCAN, {"query": sellable(f"({joined})"), "first": len(cut),
+                                               "cursor": None, "variants": OWN_WAY_VARIANT_LIMIT}))["products"]["nodes"]
+            by_handle = {n["handle"]: n for n in whole}
+            nodes = [by_handle.get(n["handle"], n) for n in nodes]
+        except (ShopifyError, KeyError, TypeError):
+            logger.warning("Could not fetch every size of %d pieces", len(cut), exc_info=True)
     pieces = [{"handle": n["handle"], "title": n.get("title"), "product_type": n.get("productType"),
                "category": (n.get("category") or {}).get("name"), "tags": ", ".join(n.get("tags") or []),
                "sizes": _size_values(n), "node": n} for n in nodes]
