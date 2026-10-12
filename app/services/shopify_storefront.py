@@ -1166,6 +1166,54 @@ def _either_side_variants(node: dict, wanted: tuple[int, int]) -> list[dict]:
     return [v for sp, v in sized if v.get("availableForSale") and (sp[1] == under or sp[0] == over)]
 
 
+def _size_values(node: dict) -> list[str]:
+    for option in node.get("options") or []:
+        if option["name"].strip().lower() in ("size", "age"):
+            return [str(v) for v in option.get("values") or []]
+    return []
+
+
+def _sized_its_own_way(node: dict) -> bool:
+    """Has sizes, and none of them is written as an age ("10Y", "18M")."""
+    values = _size_values(node)
+    return bool(values) and not any(re.search(r"\d\s*[MY]\b", v.strip().upper()) for v in values)
+
+
+async def _fitting_own_way(nodes: list[dict], wanted: tuple[int, int], currency: str) -> list[dict]:
+    """The pieces sized their own way whose sizes fit the child this size is
+    for, opened on those sizes. Which sizes fit is the model's reading of each
+    piece (services/size_ages); nothing here knows what a label means."""
+    if not nodes:
+        return []
+    from app.services import size_ages
+    from app.services.size_finder import CHART
+
+    def years(i: int) -> float:
+        label = CHART[max(0, min(i, len(CHART) - 1))].label
+        return int(label[:-1]) / (12 if label.endswith("M") else 1)
+
+    low, high = years(wanted[0]), years(wanted[1])
+    pieces = [{"handle": n["handle"], "title": n.get("title"), "product_type": n.get("productType"),
+               "category": (n.get("category") or {}).get("name"), "tags": ", ".join(n.get("tags") or []),
+               "sizes": _size_values(n), "node": n} for n in nodes]
+    await size_ages.learn(pieces)
+    found: list[dict] = []
+    for piece in pieces:
+        fit = set(size_ages.sizes_for_ages(piece, low, high))
+        node = piece["node"]
+        chosen = [v for v in node["variants"]["nodes"] if v.get("availableForSale") and _size_of(v) in fit]
+        if not chosen:
+            continue
+        product = _public_product(node, currency)
+        product["variants"] = [_public_variant(v, node) for v in chosen]
+        product["in_this_size"] = sorted({_size_of(v) for v in chosen if _size_of(v)})
+        product["variant_id"] = chosen[0].get("legacyResourceId")
+        product["price_from"] = round(min(float(v["price"]) for v in chosen), 2)
+        product["sized_its_own_way"] = True
+        found.append(product)
+    return found
+
+
 async def products_in_size(size: str, limit: int = 12, also: list[str] | None = None) -> dict:
     """Everything buyable in one size - "12Y", "18M", "5-6Y".
 
@@ -1183,6 +1231,9 @@ async def products_in_size(size: str, limit: int = 12, also: list[str] | None = 
     currency = (await shop_info())["currency"]
     matches: list[dict] = []
     nearest: list[dict] = []
+    # Sized the piece's own way - shoe sizes, cm, letters, one size - so no
+    # label names an age. Read below for which of its sizes fit this child.
+    own_way: list[dict] = []
     cursor: str | None = None
 
     def sized(node: dict, low: int, high: int) -> list[dict]:
@@ -1202,6 +1253,8 @@ async def products_in_size(size: str, limit: int = 12, also: list[str] | None = 
             # not a choice - matching the label alone found 2 pieces of dozens.
             around = [] if (fits or close) else _either_side_variants(node, wanted)
             if not (fits or close or around):
+                if _sized_its_own_way(node):
+                    own_way.append(node)
                 continue
             chosen = fits or close or around
             product = _public_product(node, currency)
@@ -1221,6 +1274,7 @@ async def products_in_size(size: str, limit: int = 12, also: list[str] | None = 
             break
         cursor = page["pageInfo"]["endCursor"]
     exact = len(matches)
+    matches += await _fitting_own_way(own_way, wanted, currency)
     matches += nearest
     return {
         "found": bool(matches),

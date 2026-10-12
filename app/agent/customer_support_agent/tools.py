@@ -663,6 +663,9 @@ async def suggest_pieces(for_who: str = "", colour: str = "", occasion: str = ""
     missing - ask for the FIRST one only. When they asked for an outfit, once age
     is known build the whole look with build_outfit, using these handles - a budget is optional, never a reason
     to wait (budget_optional=true: build it, then say they can give one to adjust).
+    sized_its_own_way=true: a piece sold in its own sizes (shoes, belts, one
+    size) rather than ages - in_this_size is which of them fits this child, so
+    name that size ("EU 33"), never call it their age size.
     typical_shoe_eu_for_age is the size chart's usual EU shoe size at their age:
     for a shoe, choose the size it is sold in nearest that number and say so.
     """
@@ -726,7 +729,7 @@ async def _with_their_size(result: dict, size: str, nearest: bool = False,
                 p["in_this_size"] = in_size[str(p.get("product_id"))]
     shown = {str(p.get("product_id")) for p in picks}
     keep = ("handle", "product_id", "variant_id", "title", "category", "for", "price_from", "currency",
-            "in_this_size", "image", "url")
+            "in_this_size", "sized_its_own_way", "image", "url")
     season = identity.shopping_season()
     if nearest:
         result["largest_size_we_make"] = size
@@ -987,6 +990,8 @@ async def browse_in_size(size: str, also: list[str] | None = None) -> str:
     made_for_this_age=true: the piece's size range covers this age but no size is
     labelled it - in_this_size gives the sizes either side ("8Y, 10Y" for 9Y).
     These are pieces for this child: show them, saying which size they come in.
+    sized_its_own_way=true: sold in its own sizes (shoes, belts, one size), and
+    in_this_size is the one that fits this child - name it ("EU 33").
     Sizes are your call: pieces_in_each_size says how many of their pieces come
     in each size this shop sells. A child's age is not always a size the range
     is made in (9Y: 2 pieces, 8Y: 24, 10Y: 27) - when it is not, call again with
