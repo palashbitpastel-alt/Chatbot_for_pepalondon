@@ -32,7 +32,7 @@ from app.agent.customer_support_agent.shopper_context import (
 )
 from app.api.v1.cards import CardCollector, cards_from, keep_mentioned, split_show, _card
 from app.services import audience, colours, market, multi_buy, needs, outfit, shopify_storefront, shopper_identity as identity
-from app.services import lessons, service_health, shops, size_finder, store_profile, suggestions, understanding
+from app.services import billing, lessons, service_health, shops, size_finder, store_profile, suggestions, understanding
 from app.services.shopify_client import ShopifyError
 from app.db.models import ChatMessage, ShopperState
 from app.db.session import AsyncSessionLocal
@@ -391,11 +391,12 @@ def _without_cards_note(text: str) -> str:
 
 
 async def _save_turn(session_id: str, message: str, reply: str, where: dict | None = None) -> None:
+    shop = shops.current()
     async with AsyncSessionLocal() as db:
         db.add_all(
             [
-                ChatMessage(session_id=session_id, role="user", content=message, context=where or None),
-                ChatMessage(session_id=session_id, role="assistant", content=reply),
+                ChatMessage(session_id=session_id, role="user", content=message, context=where or None, shop=shop),
+                ChatMessage(session_id=session_id, role="assistant", content=reply, shop=shop),
             ]
         )
         await db.commit()
@@ -751,6 +752,15 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         market.set_country(req.context.country if req.context else None)
         market.set_showing(req.context.currency if req.context else None)
         yield _sse("session", {"session_id": session_id, "agent": CUSTOMER_SUPPORT_AGENT.name})
+
+        # Partner billing: a shop switched off, or over this month's chat limit,
+        # gets one short line and no AI call (see services/billing).
+        if req.message.strip():
+            refused = await billing.refusal(shops.current(), session_id)
+            if refused:
+                code, line = refused
+                yield _sse("error", {"message": line, "code": code, "retry": False})
+                return
 
         # What they have asked for so far - age, occasion, budget, size - drawn by
         # the widget as the "Understood" panel and the "Searching for" chips.

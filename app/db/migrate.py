@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # stopped persisting Shopify data - see services.shopify_store. Add entries
 # here again if a future *persisted* table needs a new column.
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "chat_messages": {"context": "JSON"},
+    "chat_messages": {"context": "JSON", "shop": "VARCHAR(255)"},
 }
 
 

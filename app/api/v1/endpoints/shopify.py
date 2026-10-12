@@ -253,6 +253,10 @@ async def save_app_settings(request: Request) -> JSONResponse:
 # ?shop=, checked by ShopMiddleware like every storefront call).
 @router.get("/support/widget-config")
 async def widget_config() -> JSONResponse:
-    return JSONResponse({"settings": widget_settings.for_storefront(installs.settings_for(shops.current()))},
+    from app.services import billing
+    shown = widget_settings.for_storefront(installs.settings_for(shops.current()))
+    # A shop switched off for billing draws no launcher at all.
+    shown["enabled"] = billing.plan_for(shops.current())["active"]
+    return JSONResponse({"settings": shown},
                         headers={"Cache-Control": "public, max-age=60"})
 

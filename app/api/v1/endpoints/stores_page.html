@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pepa Assistant · Stores</title>
+<style>
+  :root { --bg: #f6f6f7; --card: #fff; --fg: #202223; --muted: #6d7175; --line: #e1e3e5; --accent: #1f5e4a; --off: #8e1f0b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151617; --card: #1e2022; --fg: #e3e5e7; --muted: #a0a4a8; --line: #33373b; --accent: #8fd0b5; --off: #ef9a9a; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 28px 16px 48px; }
+  main { max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  p { margin: 0; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .key { display: flex; gap: 8px; flex-wrap: wrap; }
+  input, button { font: inherit; }
+  input[type=password], input[type=text], input[type=number] { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
+  button { padding: 7px 14px; border: 0; border-radius: 8px; background: var(--fg); color: var(--card); cursor: pointer; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .on { color: var(--accent); font-weight: 600; }
+  .off { color: var(--off); font-weight: 600; }
+  input[type=number] { width: 110px; }
+  input.note { width: 100%; min-width: 180px; }
+  .msg { min-height: 1.5em; color: var(--muted); }
+</style></head>
+<body><main>
+  <h1>Stores</h1>
+  <p>Switch a client's store off when they stop paying, or set a monthly chat limit for their plan. A store that is off loses the chat launcher; over the limit, new chats get a polite "limit reached" message. Empty limit means no limit.</p>
+  <div class="card key">
+    <input id="key" type="password" placeholder="Review key" autocomplete="current-password">
+    <button id="load">Show stores</button>
+  </div>
+  <div class="card">
+    <div class="scroll"><table>
+      <thead><tr><th>Store</th><th>Status</th><th>Chats this month</th><th>Monthly limit</th><th>Note</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6"><p>Enter the review key to see the stores.</p></td></tr></tbody>
+    </table></div>
+    <p class="msg" id="msg" role="status"></p>
+  </div>
+</main>
+<script>
+const keyInput = document.getElementById('key');
+const rows = document.getElementById('rows');
+const msg = document.getElementById('msg');
+try { keyInput.value = sessionStorage.getItem('pepa-review-key') || ''; } catch (e) { /* storage blocked */ }
+const call = async (path, body) => {
+  const res = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'X-Review-Key': keyInput.value, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+};
+const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
+function row(s) {
+  const tr = document.createElement('tr');
+  tr.append(cell(s.shop));
+  const status = document.createElement('td');
+  const box = document.createElement('input'); box.type = 'checkbox'; box.checked = s.active; box.id = 'on-' + s.shop;
+  const lab = document.createElement('label'); lab.htmlFor = box.id; lab.textContent = s.active ? ' On' : ' Off'; lab.className = s.active ? 'on' : 'off';
+  box.addEventListener('change', () => { lab.textContent = box.checked ? ' On' : ' Off'; lab.className = box.checked ? 'on' : 'off'; });
+  status.append(box, lab); tr.append(status);
+  tr.append(cell(String(s.chats_this_month), 'num'));
+  const limTd = document.createElement('td');
+  const lim = document.createElement('input'); lim.type = 'number'; lim.min = '0'; lim.placeholder = 'no limit'; lim.value = s.chat_limit || '';
+  limTd.append(lim); tr.append(limTd);
+  const noteTd = document.createElement('td');
+  const note = document.createElement('input'); note.type = 'text'; note.className = 'note'; note.value = s.note || ''; note.placeholder = 'e.g. paid until 30 Nov';
+  noteTd.append(note); tr.append(noteTd);
+  const saveTd = document.createElement('td');
+  const save = document.createElement('button'); save.textContent = 'Save';
+  save.addEventListener('click', async () => {
+    save.disabled = true; msg.textContent = 'Saving ' + s.shop + '…';
+    try {
+      const saved = await call('stores/plan', { shop: s.shop, active: box.checked, chat_limit: lim.value ? Number(lim.value) : null, note: note.value });
+      msg.textContent = 'Saved ' + s.shop + ': ' + (saved.active ? 'on' : 'off') + (saved.chat_limit ? ', limit ' + saved.chat_limit : ', no limit') + '.';
+    } catch (e) { msg.textContent = 'Could not save: ' + e.message; }
+    save.disabled = false;
+  });
+  saveTd.append(save); tr.append(saveTd);
+  return tr;
+}
+document.getElementById('load').addEventListener('click', async () => {
+  try { sessionStorage.setItem('pepa-review-key', keyInput.value); } catch (e) { /* storage blocked */ }
+  msg.textContent = 'Loading…';
+  try {
+    const { stores } = await call('stores/list');
+    rows.replaceChildren(...stores.map(row));
+    msg.textContent = stores.length + ' stores.';
+  } catch (e) { msg.textContent = 'Could not load: ' + e.message; }
+});
+</script>
+</body></html>

@@ -251,6 +251,27 @@ async def save_settings(shop: str, values: dict) -> dict:
     return merged
 
 
+async def save_private(shop: str, key: str, value) -> dict:
+    """Keep a value on the shop's row that the shop's own settings page and the
+    storefront never see (keys start with "_"): the sign-in secret, billing."""
+    shop = shops.normalise(shop)
+    async with AsyncSessionLocal() as db:
+        row = await db.get(Shop, shop)
+        if row is None:
+            row = Shop(domain=shop)
+            db.add(row)
+        row.settings = {**(row.settings or {}), key: value}
+        await db.commit()
+        kept = row.settings
+    _installed.setdefault(shop, {"token": None, "scopes": "", "settings": {}})["settings"] = kept
+    return kept
+
+
+def known() -> set[str]:
+    """Every shop with a saved row (installed or not)."""
+    return set(_installed)
+
+
 async def uninstall(shop: str) -> None:
     shop = shops.normalise(shop)
     async with AsyncSessionLocal() as db:

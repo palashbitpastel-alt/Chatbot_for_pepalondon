@@ -29,6 +29,9 @@ class ChatMessage(Base):
     # Where the shopper was (country, currency) - so a reviewed turn can be
     # replayed in the same money. Shopper messages only.
     context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Which shop the chat happened on, for per-shop chat counts and limits.
+    # Empty on rows saved before shops were told apart: those are the default shop's.
+    shop: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
