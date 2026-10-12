@@ -232,27 +232,81 @@ async def request_plan(shop: str, key: str, months: int = 1) -> dict | None:
     return saved["requested"]
 
 
-async def answer_request(shop: str, accept: bool, months: int | None = None) -> dict:
-    """Accept: the shop moves to the plan it asked for, on, paid for `months`
-    from today (or from its current paid-until date if that is later).
-    Decline: the request is dropped and nothing else changes."""
+def _add_months(start, months: int):
     from datetime import date
+    month = start.month - 1 + max(1, months)
+    year, month = start.year + month // 12, month % 12 + 1
+    last = [31, 29 if year % 4 == 0 and (year % 100 or year % 400 == 0) else 28, 31, 30, 31, 30,
+            31, 31, 30, 31, 30, 31][month - 1]
+    return date(year, month, min(start.day, last))
+
+
+def _per_day(plan: dict, months: int) -> float:
+    return quote(plan, months)["per_month"] / 30
+
+
+def change_quote(shop: str, key: str, months: int) -> dict:
+    """What buying `key` for `months` does to this shop, priced and dated:
+
+    renew  - same plan with time left: the months go on after the current end.
+    change - another plan with time left: it starts today; the unused time's
+             value (at the price of the old plan's period) becomes extra days
+             of the new plan at its own price. Time left can't be multiplied.
+    new    - no time left: starts today.
+    """
+    from datetime import date
+    chosen = plan_named(key)
+    months = months if months in discounts() else 1
+    q = quote(chosen, months) if chosen else {"months": months, "discount": 0, "total": 0, "per_month": 0}
+    today = date.today()
+    current = plan_for(shop)
+    current_plan = plan_named(current["plan"])
+    days_left = 0
+    try:
+        end = date.fromisoformat(current["paid_until"])
+        days_left = max(0, (end - today).days)
+    except ValueError:
+        end = None
+    if not (current["active"] and current_plan and end and days_left > 0):
+        return {**q, "kind": "new", "ends": _add_months(today, months).isoformat()}
+    if current_plan["key"] == key:
+        return {**q, "kind": "renew", "starts": end.isoformat(), "ends": _add_months(end, months).isoformat()}
+    # The old plan's period, as near as the dates tell (30-day months).
+    try:
+        span = (end - date.fromisoformat(current["paid_from"])).days
+    except ValueError:
+        span = 30
+    old_months = min(discounts(), key=lambda m: abs(m * 30 - span))
+    credit = round(days_left * _per_day(current_plan, old_months), 2) if current_plan.get("monthly") else 0
+    per_day = _per_day(chosen, months) if chosen and chosen.get("monthly") else 0
+    extra = int(credit // per_day) if per_day else 0
+    from datetime import timedelta
+    return {**q, "kind": "change", "credit": credit, "days_left": days_left, "from_plan": current_plan["name"],
+            "extra_days": extra, "ends": (_add_months(today, months) + timedelta(days=extra)).isoformat()}
+
+
+async def apply_paid_plan(shop: str, key: str, months: int) -> dict:
+    """Put a paid-for plan in place, dated by change_quote."""
+    from datetime import date
+    shop = shops.normalise(shop)
+    change = change_quote(shop, key, months)
+    saved = dict(installs.settings_for(shop).get(KEY) or {})
+    saved.update({"plan": key, "active": True, "chat_limit": None, "requested": None,
+                  "paid_from": saved.get("paid_from") if change["kind"] == "renew" and saved.get("paid_from") else date.today().isoformat(),
+                  "paid_until": change["ends"]})
+    await installs.save_private(shop, KEY, saved)
+    return plan_for(shop)
+
+
+async def answer_request(shop: str, accept: bool, months: int | None = None) -> dict:
+    """Accept: the shop gets the plan it asked for, dated by change_quote.
+    Decline: the request is dropped and nothing else changes."""
     shop = shops.normalise(shop)
     saved = dict(installs.settings_for(shop).get(KEY) or {})
     asked = (saved.get("requested") or {}).get("plan")
     months = months or int((saved.get("requested") or {}).get("months") or 1)
-    saved["requested"] = None
     if accept and plan_named(asked):
-        start = date.today()
-        try:
-            start = max(start, date.fromisoformat(saved.get("paid_until") or ""))
-        except ValueError:
-            pass
-        month = start.month - 1 + max(1, months)
-        year, month = start.year + month // 12, month % 12 + 1
-        day = min(start.day, [31, 29 if year % 4 == 0 and (year % 100 or year % 400 == 0) else 28, 31, 30, 31, 30,
-                              31, 31, 30, 31, 30, 31][month - 1])
-        saved.update({"plan": asked, "active": True, "chat_limit": None,
-                      "paid_from": start.isoformat(), "paid_until": date(year, month, day).isoformat()})
+        return await apply_paid_plan(shop, asked, months)
+    saved["requested"] = None
     await installs.save_private(shop, KEY, saved)
     return plan_for(shop)

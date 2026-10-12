@@ -201,6 +201,19 @@ def _asked_heading(name: str, req: dict) -> str:
     return f"You asked for the {name} plan for {period}" + (f" ({_money(float(total))})" if total else "")
 
 
+def _change_note(change: dict) -> dict:
+    """The quote plus one line on what paying does to the dates."""
+    kind, ends = change.get("kind"), _nice_date(change.get("ends") or "")
+    if kind == "renew":
+        note = f"Adds to your current plan: runs until {ends}."
+    elif kind == "change":
+        note = (f"Starts today. Your {change['days_left']} days of {change['from_plan']} left "
+                f"become {change['extra_days']} extra days: runs until {ends}.")
+    else:
+        note = f"Starts today: runs until {ends}." if ends else ""
+    return {**change, "note": note}
+
+
 def _plan_sections(shop: str, info: dict) -> str:
     """The subscription part of the app's page: current plan, usage, paid-until,
     how to pay, and the plans to move to."""
@@ -266,16 +279,17 @@ def _plan_sections(shop: str, info: dict) -> str:
     for p in info.get("plans") or []:
         current = plan is not None and p.get("key") == plan.get("key")
         better = plan is None or (p.get("chats") or 0) > (plan.get("chats") or 0)
-        label = "Upgrade" if better and plan else "Choose" if not plan else "Switch"
+        label = "Renew" if current else "Upgrade" if better and plan else "Choose" if not plan else "Switch"
         if p.get("key") == requested:
             button = '<s-badge tone="warning">Requested</s-badge>'
         else:
-            button = ("" if current else
+            button = ("" if current and not p.get("monthly") else
                       f'<s-button data-plan="{_attr(p.get("key"))}" data-pay="{_attr(p.get("payment_url") or pay or "")}"'
                       f'{" variant=\"primary\"" if better else ""}>{label}</s-button>')
         features = "".join(f"<s-list-item>{html.escape(str(f))}</s-list-item>" for f in p.get("features") or [])
         from app.services import billing as _billing
-        quotes = {str(q["months"]): _billing.quote(p, q["months"]) for q in info.get("periods") or []} if p.get("monthly") else {}
+        quotes = ({str(q["months"]): _change_note(_billing.change_quote(shop, p["key"], q["months"]))
+                   for q in info.get("periods") or []} if p.get("monthly") else {})
         pays = {str(k): v for k, v in (p.get("payment_urls") or {}).items()} if isinstance(p.get("payment_urls"), dict) else {}
         button = button.replace("<s-button data-plan=", f"<s-button data-pays=\"{_attr(json.dumps(pays))}\" data-plan=", 1)
         cards.append(box(
@@ -283,7 +297,8 @@ def _plan_sections(shop: str, info: dict) -> str:
             f'{"<s-badge tone=\"info\">Current plan</s-badge>" if current else ""}</s-stack>'
             f'<s-text type="strong" data-price="{_attr(p.get("key"))}" data-quotes="{_attr(json.dumps(quotes))}">{html.escape(str(p.get("price") or ""))}</s-text>'
             f'<s-text color="subdued" data-total="{_attr(p.get("key"))}">Billed monthly</s-text>'
-            f'<s-unordered-list>{features}</s-unordered-list>{button}'))
+            f'<s-unordered-list>{features}</s-unordered-list>'
+            f'<s-text color="subdued" data-note="{_attr(p.get("key"))}">{html.escape((quotes.get("1") or {}).get("note", ""))}</s-text>{button}'))
     periods = info.get("periods") or []
     options = "".join(
         f'<s-option value="{q["months"]}"{" selected" if q["months"] == 1 else ""}>'
@@ -424,6 +439,8 @@ function showPrices() {{
     el.textContent = money(q.per_month) + ' / month';
     const total = document.querySelector('[data-total="' + el.dataset.price + '"]');
     if (total) total.textContent = m === '1' ? 'Billed monthly' : money(q.total) + ' every ' + m + ' months' + (q.discount ? ' · save ' + q.discount + '%' : '');
+    const note = document.querySelector('[data-note="' + el.dataset.price + '"]');
+    if (note) note.textContent = q.note || '';
   }});
 }}
 if (periodSelect) periodSelect.addEventListener('change', showPrices);

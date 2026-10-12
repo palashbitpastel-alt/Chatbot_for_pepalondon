@@ -203,10 +203,7 @@ async def activate(order: dict) -> bool:
     history = list(installs.settings_for(shop).get(PAYMENTS_KEY) or [])
     if any(p.get("reference") == order["reference"] for p in history):
         return False
-    saved = dict(installs.settings_for(shop).get(billing.KEY) or {})
-    saved["requested"] = {"plan": order["plan"], "months": order["months"], "on": date.today().isoformat()}
-    await installs.save_private(shop, billing.KEY, saved)
-    plan = await billing.answer_request(shop, True, order["months"])
+    plan = await billing.apply_paid_plan(shop, order["plan"], order["months"])
     history.insert(0, {"on": date.today().isoformat(), "plan": order["plan"], "months": order["months"],
                        "amount": order["amount"], "currency": order["currency"], "reference": order["reference"],
                        "provider": order["provider"], "paid_until": plan.get("paid_until")})
