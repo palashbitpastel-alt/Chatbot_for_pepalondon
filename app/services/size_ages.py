@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 BATCH = 15
 READINGS_KEY = "size_age_readings"
+# Part of every reading's fingerprint: raised when the way pieces are read
+# changes, so the readings kept from before are read again.
+READ_VERSION = 2
 # A shopper's turn never waits longer than this for a first reading; what was
 # not read in time is simply left out, and read on a later turn.
 TIMEOUT_SECONDS = 25
@@ -33,12 +36,14 @@ _ASK = (
     "You are reading a children's clothing shop's own product list.\n"
     "These pieces are not sized by age: their sizes are written the way the "
     "shop sells them - shoe sizes, measurements, letters, one size, or anything else.\n"
-    "For each piece and each of its sizes, judge from the piece itself and your "
-    "knowledge of children's sizing which ages of child (in years, decimals for "
-    "babies) that size fits. Give null for a size no child wears, and for a piece "
-    "that is not something a child wears in a size (a toy, a gift card, an adult's item).\n\n"
+    "Each piece's sizes are numbered. For each piece and each numbered size, judge "
+    "from the piece itself and your knowledge of children's sizing which ages of "
+    "child (in years, decimals for babies) that size fits. Give null for a size no "
+    "child wears, and for every size of a piece that is not something a child wears "
+    "in a size (a toy, a gift card, an adult's item).\n\n"
     "{pieces}\n\n"
-    'Answer with JSON only: {{"<handle>": {{"<size exactly as given>": [youngest, oldest] or null, ...}}, ...}}'
+    'Answer with JSON only, keyed by handle and by size number: '
+    '{{"<handle>": {{"1": [youngest, oldest] or null, "2": ...}}, ...}}'
 )
 
 _known_BY_SHOP: dict = {}   # per shop: see services/shops
@@ -54,12 +59,12 @@ def _source(piece: dict) -> str:
     for label, key in (("type", "product_type"), ("category", "category"), ("tags", "tags")):
         if piece.get(key):
             parts.append(f"{label}: {piece[key]}")
-    parts.append("sizes: " + json.dumps(_sizes(piece), ensure_ascii=False))
+    parts.append("sizes: " + json.dumps({str(n): s for n, s in enumerate(_sizes(piece), 1)}, ensure_ascii=False))
     return " | ".join(parts)
 
 
 def _fingerprint(piece: dict) -> str:
-    return hashlib.sha1(_source(piece).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(f"{READ_VERSION}|{_source(piece)}".encode("utf-8")).hexdigest()[:12]
 
 
 async def _load() -> None:
@@ -101,6 +106,10 @@ async def _save() -> None:
 
 
 def _ages(raw) -> list[float] | None:
+    if isinstance(raw, str):
+        raw = re.findall(r"\d+(?:\.\d+)?", raw)[:2]
+    if isinstance(raw, (int, float)):
+        raw = [raw, raw]
     if not isinstance(raw, (list, tuple)) or len(raw) != 2:
         return None
     try:
@@ -142,8 +151,9 @@ async def _learn(pieces: list[dict]) -> None:
             found = read.get(piece["handle"])
             if not isinstance(found, dict):
                 continue
-            known[piece["handle"]] = {"sizes": {s: _ages(found.get(s)) for s in _sizes(piece)},
-                                      "from": _fingerprint(piece)}
+            known[piece["handle"]] = {
+                "sizes": {s: _ages(found.get(str(n), found.get(s))) for n, s in enumerate(_sizes(piece), 1)},
+                "from": _fingerprint(piece)}
             got = True
         return got
 
