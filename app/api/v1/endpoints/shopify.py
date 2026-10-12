@@ -161,6 +161,46 @@ def _nice_date(iso: str) -> str:
         return iso
 
 
+def _money(amount: float) -> str:
+    return f"${amount:,.2f}".replace(".00", "")
+
+
+def _time_left(days: int | None) -> str:
+    """'2 months, 10 days left', '12 days left', 'Expired'."""
+    if days is None:
+        return ""
+    if days < 0:
+        return "Expired"
+    if days == 0:
+        return "Ends today"
+    if days < 60:
+        return f"{days} day{'s' if days != 1 else ''} left"
+    months, rest = divmod(days, 30)
+    return f"{months} months" + (f", {rest} day{'s' if rest != 1 else ''}" if rest else "") + " left"
+
+
+def _time_bar(info: dict) -> str:
+    days, total = info.get("days_left"), info.get("days_total")
+    if days is None or not total or days < 0:
+        return ""
+    pct = max(0, min(100, round(days * 100 / total)))
+    return (f'<div class="pa-meter" role="img" aria-label="{pct}% of the paid period left">'
+            f'<div style="width:{pct}%"{" class=hot" if days <= 7 else ""}></div></div>')
+
+
+def _period_label(q: dict) -> str:
+    months, off = int(q["months"]), int(q.get("discount") or 0)
+    text = "1 month" if months == 1 else f"{months} months"
+    return text + (f" · save {off}%" if off else "")
+
+
+def _asked_heading(name: str, req: dict) -> str:
+    months = int(req.get("months") or 1)
+    total = req.get("total")
+    period = "1 month" if months == 1 else f"{months} months"
+    return f"You asked for the {name} plan for {period}" + (f" ({_money(float(total))})" if total else "")
+
+
 def _plan_sections(shop: str, info: dict) -> str:
     """The subscription part of the app's page: current plan, usage, paid-until,
     how to pay, and the plans to move to."""
@@ -195,8 +235,9 @@ def _plan_sections(shop: str, info: dict) -> str:
     usage = f"{used:,} of {limit:,}" if limit else f"{used:,}"
     bar = (f'<div class="pa-meter" role="img" aria-label="{pct}% used"><div style="width:{pct}%"'
            f'{" class=hot" if pct >= 80 else ""}></div></div>') if pct is not None else '<s-text color="subdued">No monthly limit</s-text>'
-    paid = (f'<s-heading>{html.escape(_nice_date(info["paid_until"]))}</s-heading>'
-            f'<s-text color="subdued">{html.escape("expired" if days is not None and days < 0 else f"in {days} days" if days is not None else "")}</s-text>'
+    paid = (f'<s-heading>{html.escape(_time_left(days))}</s-heading>'
+            f'{_time_bar(info)}'
+            f'<s-text color="subdued">{html.escape(("Ended " if days is not None and days < 0 else "Until ") + _nice_date(info["paid_until"]))}</s-text>'
             ) if info.get("paid_until") else '<s-heading>–</s-heading><s-text color="subdued">Not set yet</s-text>'
     box = lambda inner: f'<s-box padding="base" border="base" borderRadius="base"><s-stack gap="small-200">{inner}</s-stack></s-box>'
     actions = []
@@ -209,7 +250,7 @@ def _plan_sections(shop: str, info: dict) -> str:
         '<s-grid gridTemplateColumns="repeat(auto-fit, minmax(200px, 1fr))" gap="base">' +
         box(plan_box) +
         box(f'<s-text color="subdued">Chats this month</s-text><s-heading>{usage}</s-heading>{bar}') +
-        box(f'<s-text color="subdued">Paid until</s-text>{paid}') +
+        box(f'<s-text color="subdued">Time left</s-text>{paid}') +
         '</s-grid>' +
         (f'<s-stack direction="inline" gap="base">{"".join(actions)}</s-stack>' if actions else '') +
         '</s-stack></s-section>')
@@ -219,7 +260,7 @@ def _plan_sections(shop: str, info: dict) -> str:
         usage_section = usage_section.replace(
             '<s-section heading="Plan and usage"><s-stack gap="base">',
             '<s-section heading="Plan and usage"><s-stack gap="base">'
-            f'<s-banner heading="{_attr("You asked for the " + str(asked.get("name", requested)) + " plan")}" tone="info">'
+            f'<s-banner heading="{_attr(_asked_heading(asked.get("name", requested), info.get("requested") or {}))}" tone="info">'
             f'<s-paragraph>{html.escape("We will confirm it and send you a payment link. Your plan changes once it is paid.")}</s-paragraph></s-banner>', 1)
     cards = []
     for p in info.get("plans") or []:
@@ -233,13 +274,25 @@ def _plan_sections(shop: str, info: dict) -> str:
                       f'<s-button data-plan="{_attr(p.get("key"))}" data-pay="{_attr(p.get("payment_url") or pay or "")}"'
                       f'{" variant=\"primary\"" if better else ""}>{label}</s-button>')
         features = "".join(f"<s-list-item>{html.escape(str(f))}</s-list-item>" for f in p.get("features") or [])
+        from app.services import billing as _billing
+        quotes = {str(q["months"]): _billing.quote(p, q["months"]) for q in info.get("periods") or []} if p.get("monthly") else {}
+        pays = {str(k): v for k, v in (p.get("payment_urls") or {}).items()} if isinstance(p.get("payment_urls"), dict) else {}
+        button = button.replace("<s-button data-plan=", f"<s-button data-pays=\"{_attr(json.dumps(pays))}\" data-plan=", 1)
         cards.append(box(
             f'<s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(str(p.get("name")))}</s-heading>'
             f'{"<s-badge tone=\"info\">Current plan</s-badge>" if current else ""}</s-stack>'
-            f'<s-text type="strong">{html.escape(str(p.get("price") or ""))}</s-text>'
+            f'<s-text type="strong" data-price="{_attr(p.get("key"))}" data-quotes="{_attr(json.dumps(quotes))}">{html.escape(str(p.get("price") or ""))}</s-text>'
+            f'<s-text color="subdued" data-total="{_attr(p.get("key"))}">Billed monthly</s-text>'
             f'<s-unordered-list>{features}</s-unordered-list>{button}'))
-    plans_section = ('<s-section heading="Plans"><s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">'
-                     + "".join(cards) + '</s-grid></s-section>') if cards else ""
+    periods = info.get("periods") or []
+    options = "".join(
+        f'<s-option value="{q["months"]}"{" selected" if q["months"] == 1 else ""}>'
+        f'{html.escape(_period_label(q))}</s-option>'
+        for q in periods)
+    chooser = (f'<s-select label="Billing period" id="pa-period" value="1">{options}</s-select>' if len(periods) > 1 else "")
+    plans_section = ('<s-section heading="Plans"><s-stack gap="base">' + chooser
+                     + '<s-grid gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))" gap="base">'
+                     + "".join(cards) + '</s-grid></s-stack></s-section>') if cards else ""
     return usage_section + plans_section
 
 
@@ -298,7 +351,8 @@ def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse
         + box(f'<s-text color="subdued">Assistant</s-text><s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(values.get("assistant_name") or "Assistant")}</s-heading>{status}</s-stack>')
         + box(f'<s-text color="subdued">Chats this month</s-text><s-heading>{used:,}{f" of {limit:,}" if limit else ""}</s-heading>')
         + box(f'<s-text color="subdued">Plan</s-text><s-heading>{html.escape(plan["name"] if plan else "No plan yet")}</s-heading>'
-              f'<s-link href="{APP_BASE}/plan">See plan and usage</s-link>')
+              + (f'<s-text>{html.escape(_time_left(info.get("days_left")))}</s-text>{_time_bar(info)}' if info.get("paid_until") else "")
+              + f'<s-link href="{APP_BASE}/plan">See plan and usage</s-link>')
         + '</s-grid>')
     links = "".join(
         box(f'<s-heading>{html.escape(label)}</s-heading><s-paragraph color="subdued">{html.escape(_PAGE_HELP[key])}</s-paragraph>'
@@ -359,13 +413,28 @@ form.addEventListener('submit', async (event) => {{
 
 # A plan button: tell us which plan they want, open its payment link if there is one.
 _PLAN_SCRIPT = f"""<script>
+const periodSelect = document.getElementById('pa-period');
+const months = () => Number((periodSelect && periodSelect.value) || 1);
+const money = (n) => '$' + Number(n).toLocaleString('en-US', {{ minimumFractionDigits: 0, maximumFractionDigits: 2 }});
+function showPrices() {{
+  const m = String(months());
+  document.querySelectorAll('[data-price]').forEach((el) => {{
+    const q = JSON.parse(el.dataset.quotes || '{{}}')[m];
+    if (!q) return;
+    el.textContent = money(q.per_month) + ' / month';
+    const total = document.querySelector('[data-total="' + el.dataset.price + '"]');
+    if (total) total.textContent = m === '1' ? 'Billed monthly' : money(q.total) + ' every ' + m + ' months' + (q.discount ? ' · save ' + q.discount + '%' : '');
+  }});
+}}
+if (periodSelect) periodSelect.addEventListener('change', showPrices);
 document.querySelectorAll('[data-plan]').forEach((button) => button.addEventListener('click', async () => {{
   button.setAttribute('loading', '');
   try {{
     const token = await shopify.idToken();
-    const res = await fetch('{APP_BASE}/plan-request', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify({{ plan: button.dataset.plan }}) }});
+    const res = await fetch('{APP_BASE}/plan-request', {{ method: 'POST', headers: {{ 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }}, body: JSON.stringify({{ plan: button.dataset.plan, months: months() }}) }});
     if (!res.ok) throw new Error((await res.json().catch(() => ({{}}))).detail || res.statusText);
-    if (button.dataset.pay) window.open(button.dataset.pay, '_blank');
+    const pay = JSON.parse(button.dataset.pays || '{{}}')[String(months())] || button.dataset.pay;
+    if (pay) window.open(pay, '_blank');
     shopify.toast.show('Plan request sent');
     setTimeout(() => location.reload(), 900);
   }} catch (error) {{
@@ -456,7 +525,11 @@ async def plan_request(request: Request) -> JSONResponse:
     except ValueError:
         body = {}
     from app.services import billing
-    asked = await billing.request_plan(shop, str((body or {}).get("plan") or ""))
+    try:
+        months = int((body or {}).get("months") or 1)
+    except (TypeError, ValueError):
+        months = 1
+    asked = await billing.request_plan(shop, str((body or {}).get("plan") or ""), months)
     if asked is None:
         return JSONResponse({"detail": "Unknown plan"}, status_code=400)
     logger.info("%s asked for the %s plan", shop, asked["plan"])

@@ -29,13 +29,39 @@ KEY = "_billing"
 # same shape) replaces these without a code change. payment_url: a Stripe or
 # Razorpay payment link for the plan, used by its Upgrade button.
 DEFAULT_PLANS = [
-    {"key": "starter", "name": "Starter", "price": "$29 / month", "chats": 1000,
+    {"key": "starter", "name": "Starter", "price": "$29 / month", "monthly": 29, "chats": 1000,
      "features": ["1,000 chats a month", "Product search and recommendations", "Size finder", "Email support"]},
-    {"key": "growth", "name": "Growth", "price": "$79 / month", "chats": 5000,
+    {"key": "growth", "name": "Growth", "price": "$79 / month", "monthly": 79, "chats": 5000,
      "features": ["5,000 chats a month", "Everything in Starter", "Complete-the-look outfits", "Priority support"]},
-    {"key": "pro", "name": "Pro", "price": "$199 / month", "chats": 15000,
+    {"key": "pro", "name": "Pro", "price": "$199 / month", "monthly": 199, "chats": 15000,
      "features": ["15,000 chats a month", "Everything in Growth", "Custom assistant instructions", "Dedicated support"]},
 ]
+
+
+# How long a merchant can pay for at once, and the saving for each (percent).
+# SUPPORT_PERIOD_DISCOUNTS ({"1": 0, "3": 5, "6": 10, "12": 20}) replaces these.
+DEFAULT_DISCOUNTS = {1: 0, 3: 5, 6: 10, 12: 20}
+
+
+def discounts() -> dict[int, int]:
+    from app.core.config import settings
+    import json
+    try:
+        custom = json.loads(settings.SUPPORT_PERIOD_DISCOUNTS or "null")
+        if isinstance(custom, dict) and custom:
+            return {int(k): max(0, min(90, int(v))) for k, v in custom.items() if int(k) in (1, 3, 6, 12)}
+    except (ValueError, TypeError):
+        pass
+    return dict(DEFAULT_DISCOUNTS)
+
+
+def quote(plan: dict, months: int) -> dict:
+    """What a plan costs for a period: total, per month, the saving."""
+    monthly = float(plan.get("monthly") or 0)
+    off = discounts().get(months, 0)
+    total = round(monthly * months * (100 - off) / 100, 2)
+    return {"months": months, "discount": off, "total": total,
+            "per_month": round(total / months, 2) if months else total}
 
 
 def plans() -> list[dict]:
@@ -69,6 +95,7 @@ def plan_for(shop: str) -> dict:
         "plan": chosen["key"] if chosen else None,
         "chat_limit": int(limit) if isinstance(limit, int) and limit > 0 else None,
         "paid_until": str(saved.get("paid_until") or ""),
+        "paid_from": str(saved.get("paid_from") or ""),
         "payment_url": str(saved.get("payment_url") or ""),
         "note": str(saved.get("note") or ""),
         "requested": saved.get("requested") if isinstance(saved.get("requested"), dict) else None,
@@ -116,6 +143,16 @@ async def refusal(shop: str, session_id: str) -> tuple[str, str] | None:
     return None
 
 
+def _paid_from(shop: str, paid_until: str) -> str:
+    """Keep the period's start when the paid-until date is unchanged; a new
+    date set by hand starts the period today."""
+    from datetime import date
+    saved = installs.settings_for(shop).get(KEY) or {}
+    if paid_until and paid_until == saved.get("paid_until"):
+        return str(saved.get("paid_from") or "")
+    return date.today().isoformat() if paid_until else ""
+
+
 async def set_plan(shop: str, active: bool, chat_limit: int | None, note: str, plan: str | None = None,
                    paid_until: str = "", payment_url: str = "") -> dict:
     import re
@@ -124,6 +161,7 @@ async def set_plan(shop: str, active: bool, chat_limit: int | None, note: str, p
              # Empty: the plan's own allowance. A number: a limit set for this shop.
              "chat_limit": int(chat_limit) if chat_limit and int(chat_limit) > 0 else None,
              "paid_until": paid_until if re.fullmatch(r"\d{4}-\d{2}-\d{2}", paid_until or "") else "",
+             "paid_from": _paid_from(shop, paid_until),
              "payment_url": payment_url if (payment_url or "").startswith("https://") else "",
              "note": (note or "")[:300],
              # Saving the store's plan answers the merchant's request.
@@ -154,12 +192,15 @@ async def for_merchant(shop: str) -> dict:
     used = await chats_this_month(shop)
     limit = plan["chat_limit"]
     chosen = plan_named(plan["plan"])
-    days_left = None
+    days_left = days_total = None
     if plan["paid_until"]:
         try:
-            days_left = (date.fromisoformat(plan["paid_until"]) - date.today()).days
+            end = date.fromisoformat(plan["paid_until"])
+            days_left = (end - date.today()).days
+            if plan["paid_from"]:
+                days_total = max(1, (end - date.fromisoformat(plan["paid_from"])).days)
         except ValueError:
-            days_left = None
+            days_left = days_total = None
     return {
         "active": plan["active"],
         "plan": chosen,
@@ -168,25 +209,30 @@ async def for_merchant(shop: str) -> dict:
         "percent": min(100, round(used * 100 / limit)) if limit else None,
         "paid_until": plan["paid_until"],
         "days_left": days_left,
+        "days_total": days_total,
         "payment_url": plan["payment_url"] or (chosen or {}).get("payment_url") or "",
         "requested": plan["requested"],
         "plans": plans(),
+        "periods": [{"months": m, "discount": d} for m, d in sorted(discounts().items())],
     }
 
 
-async def request_plan(shop: str, key: str) -> dict | None:
+async def request_plan(shop: str, key: str, months: int = 1) -> dict | None:
     """The merchant picked a plan in the app: remember it for us to confirm
     (we switch them once they have paid). None for an unknown plan."""
     from datetime import date
-    if not plan_named(key):
+    chosen = plan_named(key)
+    if not chosen:
         return None
+    months = months if months in discounts() else 1
     saved = dict(installs.settings_for(shop).get(KEY) or {})
-    saved["requested"] = {"plan": key, "on": date.today().isoformat()}
+    saved["requested"] = {"plan": key, "months": months, "total": quote(chosen, months)["total"],
+                          "on": date.today().isoformat()}
     await installs.save_private(shops.normalise(shop), KEY, saved)
     return saved["requested"]
 
 
-async def answer_request(shop: str, accept: bool, months: int = 1) -> dict:
+async def answer_request(shop: str, accept: bool, months: int | None = None) -> dict:
     """Accept: the shop moves to the plan it asked for, on, paid for `months`
     from today (or from its current paid-until date if that is later).
     Decline: the request is dropped and nothing else changes."""
@@ -194,6 +240,7 @@ async def answer_request(shop: str, accept: bool, months: int = 1) -> dict:
     shop = shops.normalise(shop)
     saved = dict(installs.settings_for(shop).get(KEY) or {})
     asked = (saved.get("requested") or {}).get("plan")
+    months = months or int((saved.get("requested") or {}).get("months") or 1)
     saved["requested"] = None
     if accept and plan_named(asked):
         start = date.today()
@@ -206,6 +253,6 @@ async def answer_request(shop: str, accept: bool, months: int = 1) -> dict:
         day = min(start.day, [31, 29 if year % 4 == 0 and (year % 100 or year % 400 == 0) else 28, 31, 30, 31, 30,
                               31, 31, 30, 31, 30, 31][month - 1])
         saved.update({"plan": asked, "active": True, "chat_limit": None,
-                      "paid_until": date(year, month, day).isoformat()})
+                      "paid_from": start.isoformat(), "paid_until": date(year, month, day).isoformat()})
     await installs.save_private(shop, KEY, saved)
     return plan_for(shop)

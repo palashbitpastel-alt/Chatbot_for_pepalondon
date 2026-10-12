@@ -30,7 +30,7 @@
 </style></head>
 <body><main>
   <h1>Stores</h1>
-  <p>When a merchant chooses a plan in the app, it shows here as "Requested". Once they have paid, click Accept: they move to that plan, switched on, paid for one month. Or pick each client's plan, the date their payment covers, and their payment link; merchants see these on the app's page in their Shopify admin. Switch a store off when they stop paying. Limit: empty uses the plan's chats. The note is private to us.</p>
+  <p>When a merchant chooses a plan in the app, it shows here as "Requested". Once they have paid, click Accept: they move to that plan, switched on, paid for the months they chose. Or pick each client's plan, the date their payment covers, and their payment link; merchants see these on the app's page in their Shopify admin. Switch a store off when they stop paying. Limit: empty uses the plan's chats. The note is private to us.</p>
   <div class="card key">
     <input id="key" type="password" placeholder="Review key" autocomplete="current-password">
     <button id="load">Show stores</button>
@@ -74,17 +74,19 @@ function row(s) {
     const asked = PLANS.find((p) => p.key === s.requested.plan);
     const req = document.createElement('div');
     req.style.cssText = 'font-size:12.5px;color:#b98900;margin-top:4px;font-weight:600';
-    req.textContent = `Requested: ${asked ? asked.name : s.requested.plan} (${s.requested.on})`;
+    const m = Number(s.requested.months || 1);
+    req.textContent = `Requested: ${asked ? asked.name : s.requested.plan} · ${m === 1 ? '1 month' : m + ' months'}`
+      + (s.requested.total ? ` · $${s.requested.total}` : '') + ` (${s.requested.on})`;
     const answer = (accept) => async () => {
       msg.textContent = (accept ? 'Accepting' : 'Declining') + ' the request from ' + s.shop + '…';
       try {
-        const saved = await call('stores/request', { shop: s.shop, accept, months: 1 });
+        const saved = await call('stores/request', { shop: s.shop, accept });
         msg.textContent = accept ? `Accepted: ${s.shop} is on ${saved.plan}, paid until ${saved.paid_until}.` : `Declined the request from ${s.shop}.`;
         document.getElementById('load').click();
       } catch (e) { msg.textContent = 'Could not answer: ' + e.message; }
     };
     const yes = document.createElement('button'); yes.textContent = 'Accept'; yes.style.marginTop = '6px';
-    yes.title = 'Move them to this plan, on, paid for one month';
+    yes.title = 'Move them to this plan, switched on, paid for the months they chose';
     yes.addEventListener('click', answer(true));
     const no = document.createElement('button'); no.textContent = 'Decline'; no.style.cssText = 'margin:6px 0 0 6px;background:transparent;color:inherit;border:1px solid var(--line)';
     no.addEventListener('click', answer(false));

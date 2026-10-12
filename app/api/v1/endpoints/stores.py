@@ -26,7 +26,7 @@ PAGE = Path(__file__).with_name("stores_page.html")
 class Answer(BaseModel):
     shop: str = Field(max_length=255)
     accept: bool
-    months: int = Field(default=1, ge=1, le=24)
+    months: int | None = Field(default=None, ge=1, le=24)
 
 
 class Plan(BaseModel):

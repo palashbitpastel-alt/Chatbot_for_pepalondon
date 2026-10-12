@@ -152,6 +152,8 @@ class Settings(BaseSettings):
     # services/billing.DEFAULT_PLANS for the shape), and where they write to us.
     SUPPORT_PLANS: str = ""
     SUPPORT_CONTACT_EMAIL: str = ""
+    # Saving per billing period, percent: {"1": 0, "3": 5, "6": 10, "12": 20}.
+    SUPPORT_PERIOD_DISCOUNTS: str = ""
     SHOPIFY_ACCESS_TOKEN: str = ""
     # Storefront API token for Shopify's own search (see services/shopify_search).
     # Optional: without it the app tries to make one, then uses the Admin search.
