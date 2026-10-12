@@ -6,11 +6,15 @@ the executor wiring and the chat-history conversion all live here so the agents
 stay thin and behave consistently.
 """
 
+import json
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from contextvars import ContextVar
 from typing import Any
 
+import httpx
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -20,7 +24,43 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 MAX_ITERATIONS = 6
+
+# Every request a chat turn makes to an AI model - "model status ms" - so a
+# slow or failed reply shows which model answered, which refused (429 = rate
+# limit) and how long each took. The chat sets a list here per turn.
+ai_calls: ContextVar[list | None] = ContextVar("ai_calls", default=None)
+
+
+async def _call_started(request: httpx.Request) -> None:
+    request.extensions["pepa_started"] = time.monotonic()
+
+
+async def _call_answered(response: httpx.Response) -> None:
+    request = response.request
+    try:
+        model = json.loads(request.content or b"{}").get("model", "?")
+    except (ValueError, AttributeError, httpx.RequestNotRead):
+        model = "?"
+    ms = round((time.monotonic() - request.extensions.get("pepa_started", time.monotonic())) * 1000)
+    line = f"{model} {response.status_code} {ms}ms"
+    logger.info("AI call: %s", line)
+    calls = ai_calls.get()
+    if calls is not None:
+        calls.append(line)
+
+
+_http: httpx.AsyncClient | None = None
+
+
+def _ai_http() -> httpx.AsyncClient:
+    # One client for every model call: shared connections, and the hooks above.
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(event_hooks={"request": [_call_started], "response": [_call_answered]})
+    return _http
 
 # (role, content) pairs where role is 'user' or 'assistant'.
 ChatHistory = list[tuple[str, str]]
@@ -127,6 +167,7 @@ def _deepseek(temperature: float, max_tokens: int | None) -> ChatOpenAI:
         # A stalled model must not hold the shopper's chat for ten minutes.
         timeout=60,
         max_retries=1,
+        http_async_client=_ai_http(),
     )
 
 
@@ -175,6 +216,7 @@ def _gemini(model: str, temperature: float, max_tokens: int | None) -> ChatOpenA
         extra_body=extra,
         timeout=60,
         max_retries=1,
+        http_async_client=_ai_http(),
     )
 
 

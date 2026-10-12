@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from app.agent.base import ai_calls
 from app.agent.customer_support_agent import CUSTOMER_SUPPORT_AGENT
 from app.agent.customer_support_agent import tools
 from app.core.config import settings
@@ -743,6 +744,9 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
         # in `done` as "timing" so a slow reply can be read off the live bot.
         started = time.monotonic()
         timing: dict = {}
+        calls: list = []
+        ai_calls.set(calls)
+        timing["ai_calls"] = calls
         greeting_tiles = greeting_chips = None
 
         def mark(step: str) -> None:
@@ -992,7 +996,7 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             service_health.record(kind, exc)
             code = service_health.shopper_code(kind)
             failed: dict = {"message": service_health.SHOPPER_MESSAGES[code], "code": code,
-                            "retry": code in ("ai_busy", "unexpected")}
+                            "retry": code in ("ai_busy", "unexpected"), "timing": timing}
             if code == "ai_unavailable":
                 failed["offer_size"] = True
                 try:
