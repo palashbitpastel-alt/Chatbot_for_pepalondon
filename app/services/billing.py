@@ -8,7 +8,10 @@ us directly (Stripe, Razorpay, invoice). This is the backend side of that:
 - an optional monthly chat limit: once a shop has had that many conversations
   this month, a new one gets a "limit reached" line, while conversations
   already started this month carry on;
-- a note for us ("paid until 30 Nov").
+- a note for us ("paid until 30 Nov");
+- a paid-until date: once it has passed by SUPPORT_GRACE_DAYS, the shop
+  pauses itself (same as off) until it renews. A shop with no date never
+  pauses this way.
 
 Every shop is on, with no limit, until set otherwise - so nothing changes for a
 shop nobody has touched. Kept on the shop's row under "_billing", which the
@@ -90,8 +93,22 @@ def plan_for(shop: str) -> dict:
     chosen = plan_named(saved.get("plan"))
     if not (isinstance(limit, int) and limit > 0):
         limit = chosen.get("chats") if chosen else None   # the plan's own allowance
+    active = saved.get("active", True) is not False
+    paid_until = str(saved.get("paid_until") or "")
+    grace_until, lapsed = "", False
+    if paid_until:
+        from datetime import date, timedelta
+        from app.core.config import settings
+        try:
+            grace = date.fromisoformat(paid_until) + timedelta(days=max(0, settings.SUPPORT_GRACE_DAYS))
+            grace_until, lapsed = grace.isoformat(), date.today() > grace
+        except ValueError:
+            pass
     return {
-        "active": saved.get("active", True) is not False,
+        "active": active,                    # our on/off switch
+        "lapsed": lapsed,                    # paid time and grace days are over
+        "running": active and not lapsed,    # what the storefront actually gets
+        "grace_until": grace_until,
         "plan": chosen["key"] if chosen else None,
         "chat_limit": int(limit) if isinstance(limit, int) and limit > 0 else None,
         "paid_until": str(saved.get("paid_until") or ""),
@@ -135,8 +152,8 @@ async def _started_this_month(shop: str, session_id: str) -> bool:
 async def refusal(shop: str, session_id: str) -> tuple[str, str] | None:
     """(code, shopper message) when this shop may not chat now, else None."""
     plan = plan_for(shop)
-    if not plan["active"]:
-        return "paused", PAUSED_MESSAGE
+    if not plan["running"]:
+        return ("expired" if plan["active"] else "paused"), PAUSED_MESSAGE
     if plan["chat_limit"] and not await _started_this_month(shop, session_id):
         if await chats_this_month(shop) >= plan["chat_limit"]:
             return "limit", LIMIT_MESSAGE
@@ -203,6 +220,9 @@ async def for_merchant(shop: str) -> dict:
             days_left = days_total = None
     return {
         "active": plan["active"],
+        "lapsed": plan["lapsed"],
+        "running": plan["running"],
+        "grace_until": plan["grace_until"],
         "plan": chosen,
         "chats_used": used,
         "chat_limit": limit,

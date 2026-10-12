@@ -62,6 +62,7 @@ function row(s) {
   const status = document.createElement('td');
   const box = document.createElement('input'); box.type = 'checkbox'; box.checked = s.active; box.id = 'on-' + s.shop;
   const lab = document.createElement('label'); lab.htmlFor = box.id; lab.textContent = s.active ? ' On' : ' Off'; lab.className = s.active ? 'on' : 'off';
+  if (s.active && s.lapsed) { lab.textContent = ' On, but paused: paid time ended'; lab.className = 'off'; lab.title = 'Paused itself after the grace days. A payment or a later Paid until date switches it back on.'; }
   box.addEventListener('change', () => { lab.textContent = box.checked ? ' On' : ' Off'; lab.className = box.checked ? 'on' : 'off'; });
   status.append(box, lab); tr.append(status);
   const planTd = document.createElement('td');

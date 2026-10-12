@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     SUPPORT_CONTACT_EMAIL: str = ""
     # Saving per billing period, percent: {"1": 0, "3": 5, "6": 10, "12": 20}.
     SUPPORT_PERIOD_DISCOUNTS: str = ""
+    # Days a shop keeps chatting after its paid-until date before it pauses itself.
+    SUPPORT_GRACE_DAYS: int = 3
     # Taking payment for plans (see services/payments). Set one provider's keys;
     # PAYMENT_PROVIDER ("stripe" or "razorpay") picks one when both are set.
     PAYMENT_PROVIDER: str = ""

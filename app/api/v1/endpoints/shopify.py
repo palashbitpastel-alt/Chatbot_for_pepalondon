@@ -223,24 +223,30 @@ def _plan_sections(shop: str, info: dict) -> str:
     contact = settings.SUPPORT_CONTACT_EMAIL
     days = info.get("days_left")
     banners = []
+    ended = _nice_date(info.get("paid_until") or "")
     if not info["active"]:
         banners.append(("critical", "The assistant is paused on your store",
                         "Shoppers can't chat until your plan is renewed. Renew below or contact us."))
+    elif info.get("lapsed"):
+        banners.append(("critical", f"The assistant is paused: your plan ended on {ended}",
+                        "Shoppers can't chat right now. Renew below and it switches back on straight away."))
     elif days is not None and days < 0:
-        banners.append(("critical", "Your plan has expired", "Renew to keep the assistant running."))
+        banners.append(("critical", f"Your plan ended on {ended}",
+                        f"The assistant keeps running until {_nice_date(info.get('grace_until') or '')}, then pauses. "
+                        "Renew now to avoid a break."))
     elif days is not None and days <= 7:
         banners.append(("warning", f"Your plan renews in {days} day{'s' if days != 1 else ''}",
                         "Pay before then to keep the assistant running without a break."))
-    if info["active"] and pct is not None and pct >= 100:
+    if info.get("running") and pct is not None and pct >= 100:
         banners.append(("critical", "You have used all of this month's chats",
                         "New conversations are paused until next month. Upgrade to continue now."))
-    elif info["active"] and pct is not None and pct >= 80:
+    elif info.get("running") and pct is not None and pct >= 80:
         banners.append(("warning", f"You have used {pct}% of this month's chats",
                         "Upgrade before you reach the limit so shoppers can keep chatting."))
     banner_html = "".join(
         f'<s-banner heading="{_attr(h)}" tone="{tone}"><s-paragraph>{html.escape(t)}</s-paragraph></s-banner>'
         for tone, h, t in banners)
-    status = ('<s-badge tone="success">Active</s-badge>' if info["active"]
+    status = ('<s-badge tone="success">Active</s-badge>' if info.get("running", info["active"])
               else '<s-badge tone="critical">Paused</s-badge>')
     plan_box = (f'<s-text color="subdued">Current plan</s-text>'
                 f'<s-stack direction="inline" gap="small-200" alignItems="center"><s-heading>{html.escape(plan["name"] if plan else "No plan yet")}</s-heading>{status}</s-stack>'
@@ -358,7 +364,7 @@ def _shell(shop: str, heading: str, body: str, script: str = "", save: bool = Fa
 def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse:
     plan = info.get("plan")
     used, limit = info["chats_used"], info.get("chat_limit")
-    status = ('<s-badge tone="success">Active</s-badge>' if info["active"]
+    status = ('<s-badge tone="success">Active</s-badge>' if info.get("running", info["active"])
               else '<s-badge tone="critical">Paused</s-badge>')
     box = lambda inner: f'<s-box padding="base" border="base" borderRadius="base"><s-stack gap="small-200">{inner}</s-stack></s-box>'
     cards = (
@@ -373,8 +379,16 @@ def _home_page(shop: str, editor: str, values: dict, info: dict) -> HTMLResponse
         box(f'<s-heading>{html.escape(label)}</s-heading><s-paragraph color="subdued">{html.escape(_PAGE_HELP[key])}</s-paragraph>'
             f'<s-link href="{APP_BASE}/{key}">Open {html.escape(label.lower())}</s-link>')
         for key, label, _ in _APP_PAGES)
+    alert = ""
+    days = info.get("days_left")
+    if info.get("lapsed") or (info["active"] and days is not None and days < 0):
+        heading = ("The assistant is paused: your plan has ended" if info.get("lapsed")
+                   else f"Your plan has ended - the assistant pauses after {_nice_date(info.get('grace_until') or '')}")
+        alert = (f'<s-banner heading="{_attr(heading)}" tone="critical"><s-stack direction="inline">'
+                 f'<s-button href="{APP_BASE}/plan" variant="primary">Renew</s-button></s-stack></s-banner>')
     body = (
-        cards
+        alert
+        + cards
         + f'<s-banner heading="Switch the assistant on in your theme" tone="info"><s-stack gap="small-200">'
           f'<s-paragraph>Connected to {html.escape(shop)}. Turn on Pepa Assistant under App embeds once; set everything else here in the app.</s-paragraph>'
           f'<s-stack direction="inline"><s-button href="{_attr(editor)}" target="_top">Open the theme editor</s-button></s-stack></s-stack></s-banner>'
@@ -563,7 +577,7 @@ async def widget_config() -> JSONResponse:
     from app.services import billing
     shown = widget_settings.for_storefront(installs.settings_for(shops.current()))
     # A shop switched off for billing draws no launcher at all.
-    shown["enabled"] = billing.plan_for(shops.current())["active"]
+    shown["enabled"] = billing.plan_for(shops.current())["running"]
     return JSONResponse({"settings": shown},
                         headers={"Cache-Control": "public, max-age=60"})
 
