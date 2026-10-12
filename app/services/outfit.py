@@ -1149,7 +1149,10 @@ async def complete_the_look(product: str, size: str | None = None,
     # but every piece sold in several sizes is left for them to size: a guess
     # once dressed a shopper's daughter as a toddler without saying so.
     sizes_unknown = False
-    if not (size or identity.wants_size()):
+    # The age they told us, when no size says one: "for my 8 year old" with a
+    # size read off the piece's own title ("21-36EU") dressed him as a 12 year old.
+    told_age = identity.child_age()
+    if not (size or identity.wants_size()) and told_age is None:
         spread = sorted({a for x in (anchor["sizes"] or []) if (a := _age_of(x)) is not None}) \
             or sorted(set(_numbers_in(anchor["sizes"] or [])))
         sizes_unknown = len(spread) > 1
@@ -1162,6 +1165,9 @@ async def complete_the_look(product: str, size: str | None = None,
     age = _age_of(size)
     if age is None:
         age = _age_of(identity.wants_size())   # nought is an age: a baby is 0
+    if age is None and told_age is not None:
+        age = told_age
+        size = next((x for x in anchor["sizes"] if _age_of(x) == age), size)
     if age is None:
         # Nobody has said how old the child is, and the piece runs from 18 months
         # to twelve years. Taking its first size dressed everyone as a baby and
