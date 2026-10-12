@@ -567,16 +567,23 @@ async def plan_request(request: Request) -> JSONResponse:
         months = int((body or {}).get("months") or 1)
     except (TypeError, ValueError):
         months = 1
-    asked = await billing.request_plan(shop, str((body or {}).get("plan") or ""), months)
-    if asked is None:
+    key = str((body or {}).get("plan") or "")
+    if not billing.plan_named(key):
         return JSONResponse({"detail": "Unknown plan"}, status_code=400)
-    logger.info("%s asked for the %s plan", shop, asked["plan"])
     from app.services import payments
-    try:
-        url = await payments.checkout(shop, asked["plan"], asked["months"])
-    except payments.PaymentError as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=502)
-    return JSONResponse({"shop": shop, "requested": asked, "checkout_url": url})
+    if payments.provider():
+        # Paying online: nothing is recorded until the payment arrives, so a
+        # closed checkout leaves the page as it was.
+        try:
+            url = await payments.checkout(shop, key, months)
+        except payments.PaymentError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=502)
+        if url:
+            logger.info("%s opened a checkout for the %s plan, %s months", shop, key, months)
+            return JSONResponse({"shop": shop, "checkout_url": url})
+    asked = await billing.request_plan(shop, key, months)
+    logger.info("%s asked for the %s plan", shop, asked["plan"])
+    return JSONResponse({"shop": shop, "requested": asked})
 
 
 @router.get("/shopify/app/{page}", response_class=HTMLResponse, include_in_schema=False)
@@ -597,6 +604,8 @@ async def shopify_app_page(page: str, request: Request) -> HTMLResponse:
         from app.services import billing
         info = await billing.for_merchant(shop)
         from app.services import payments
+        if payments.provider():
+            info["requested"] = None   # online payment: a request waits on no one
         body = _plan_sections(shop, info) + _history_section(payments.history_for(shop))
         if request.query_params.get("paid"):
             body = ('<s-banner heading="Thank you - payment received" tone="success"><s-paragraph>'
