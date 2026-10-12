@@ -6,6 +6,7 @@ the executor wiring and the chat-history conversion all live here so the agents
 stay thin and behave consistently.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -201,13 +202,88 @@ class _GeminiChat(ChatOpenAI):
         return payload
 
 
+class GeminiSkipped(RuntimeError):
+    """Raised for a model that is resting or stalled, so the next model answers."""
+
+    status_code = 503   # read as "AI busy" if every model fails (service_health.classify)
+
+
+# Free-tier Gemini sometimes refuses for the minute (429) or sits on a request
+# for 15-60 s. A model that is not the last in GEMINI_MODEL now hands over at
+# once instead: it skips its own retry, gives up on a stall after
+# GEMINI_STALL_SECONDS (plus time to write the answer it was asked for), and
+# after a 429 rests for GEMINI_REST_SECONDS so the next calls go straight to the
+# next model. The last model keeps the full timeout and retry, as before - it
+# is never skipped, so a reply can't fail where it would have succeeded.
+_gemini_resting_until: dict[str, float] = {}
+
+
+class _HandingOverGemini(_GeminiChat):
+    """A Gemini model with another one behind it in the chain."""
+
+    # The answer's own tokens (thinking excluded); None: unknown, no cap on a
+    # whole non-streamed answer.
+    pepa_answer_tokens: int | None = None
+
+    def _check_resting(self) -> None:
+        if time.monotonic() < _gemini_resting_until.get(self.model_name, 0.0):
+            raise GeminiSkipped(f"{self.model_name} is resting after a rate limit")
+
+    def _note(self, exc: BaseException) -> None:
+        if getattr(exc, "status_code", None) == 429 and settings.GEMINI_REST_SECONDS > 0:
+            _gemini_resting_until[self.model_name] = time.monotonic() + settings.GEMINI_REST_SECONDS
+            logger.info("AI call: %s rate-limited, next model answers for %ss",
+                        self.model_name, settings.GEMINI_REST_SECONDS)
+
+    def _whole_answer_limit(self) -> float | None:
+        if settings.GEMINI_STALL_SECONDS <= 0 or self.pepa_answer_tokens is None:
+            return None
+        return settings.GEMINI_STALL_SECONDS + self.pepa_answer_tokens / max(settings.GEMINI_TOKENS_PER_SECOND, 1)
+
+    async def _agenerate(self, *args: Any, **kwargs: Any):
+        self._check_resting()
+        limit = self._whole_answer_limit()
+        try:
+            call = super()._agenerate(*args, **kwargs)
+            return await (asyncio.wait_for(call, limit) if limit else call)
+        except asyncio.TimeoutError as exc:
+            logger.info("AI call: %s stalled over %.0fs, next model answers", self.model_name, limit)
+            raise GeminiSkipped(f"{self.model_name} stalled") from exc
+        except Exception as exc:
+            self._note(exc)
+            raise
+
+    async def _astream(self, *args: Any, **kwargs: Any):
+        # Only the wait for the first piece is capped: once the answer is
+        # flowing it is never cut off.
+        self._check_resting()
+        stream = super()._astream(*args, **kwargs)
+        stall = settings.GEMINI_STALL_SECONDS
+        try:
+            try:
+                first = await (asyncio.wait_for(stream.__anext__(), stall) if stall > 0 else stream.__anext__())
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError as exc:
+                logger.info("AI call: %s stalled over %.0fs, next model answers", self.model_name, stall)
+                raise GeminiSkipped(f"{self.model_name} stalled") from exc
+            except Exception as exc:
+                self._note(exc)
+                raise
+            yield first
+            async for chunk in stream:
+                yield chunk
+        finally:
+            await stream.aclose()
+
+
 def _gemini_models() -> list[str]:
     return [m.strip() for m in settings.GEMINI_MODEL.split(",") if m.strip()]
 
 
-def _gemini(model: str, temperature: float, max_tokens: int | None) -> ChatOpenAI:
+def _gemini(model: str, temperature: float, max_tokens: int | None, last: bool = True) -> ChatOpenAI:
     extra = {"reasoning_effort": settings.GEMINI_REASONING_EFFORT} if settings.GEMINI_REASONING_EFFORT else None
-    return _GeminiChat(
+    common = dict(
         model=model,
         api_key=settings.GEMINI_API_KEY,
         base_url=settings.GEMINI_BASE_URL,
@@ -215,9 +291,12 @@ def _gemini(model: str, temperature: float, max_tokens: int | None) -> ChatOpenA
         max_tokens=max_tokens + _GEMINI_THINKING_TOKENS if max_tokens else None,
         extra_body=extra,
         timeout=60,
-        max_retries=1,
         http_async_client=_ai_http(),
     )
+    if last:
+        return _GeminiChat(**common, max_retries=1)
+    # The next model is the retry.
+    return _HandingOverGemini(**common, max_retries=0, pepa_answer_tokens=max_tokens)
 
 
 def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> Runnable:
@@ -232,7 +311,8 @@ def build_llm(temperature: float = 0.2, max_tokens: int | None = None) -> Runnab
     use_deepseek = settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY and not resting
     chain = [_deepseek(temperature, max_tokens)] if use_deepseek else []
     if settings.GEMINI_API_KEY:
-        chain += [_gemini(m, temperature, max_tokens) for m in _gemini_models()]
+        models = _gemini_models()
+        chain += [_gemini(m, temperature, max_tokens, last=i == len(models) - 1) for i, m in enumerate(models)]
     if len(chain) < 2:
         return chain[0] if chain else _deepseek(temperature, max_tokens)
     return chain[0].with_fallbacks(chain[1:])

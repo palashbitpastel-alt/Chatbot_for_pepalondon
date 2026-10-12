@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     # Gemini thinks before it answers, and that thinking comes out of max_tokens;
     # "low" keeps it short so a small JSON answer is not cut off.
     GEMINI_REASONING_EFFORT: str = "low"
+    # A Gemini model with another behind it gives up after this many seconds
+    # without an answer starting (0 = wait the full minute) - plus, for a whole
+    # answer, its length at GEMINI_TOKENS_PER_SECOND - and the next one answers.
+    # A normal answer starts in 1-2 s. The last model always waits the minute.
+    GEMINI_STALL_SECONDS: float = 8
+    GEMINI_TOKENS_PER_SECOND: int = 100
+    # After a rate limit (429), that model is skipped for this long (0 = never).
+    GEMINI_REST_SECONDS: int = 60
 
     # The storefront widget can send who is signed in, but that block comes from
     # the browser and can say anything. Off by default: with it on, anyone who
