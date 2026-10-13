@@ -101,3 +101,29 @@ async def forget_shop(shop: str) -> dict:
             delete(StoreSetting).where(StoreSetting.key.startswith(f"{shop}|", autoescape=True)))).rowcount or 0
         await db.commit()
     return gone
+
+
+async def export_customer(shop: str, email: str | None, customer_id: str | None) -> dict:
+    """Shopify's customers/data_request: everything kept about this customer -
+    the conversations that mention their email, and their saved state - for a
+    person to send them."""
+    email = (email or "").strip().lower()
+    out: dict = {"shop": shop or None, "email": email or None, "customer_id": customer_id or None,
+                 "conversations": [], "saved_state": None}
+    async with AsyncSessionLocal() as db:
+        if email and "@" in email:
+            mentions = select(ChatMessage.session_id).where(
+                ChatMessage.session_id.like(SHOPPER_SESSIONS),
+                func.lower(ChatMessage.content).contains(email, autoescape=True))
+            if shop:
+                mentions = mentions.where((ChatMessage.shop == shop) | (ChatMessage.shop.is_(None)))
+            for session in sorted(set((await db.execute(mentions)).scalars().all())):
+                rows = (await db.execute(select(ChatMessage).where(ChatMessage.session_id == session)
+                                         .order_by(ChatMessage.id))).scalars().all()
+                out["conversations"].append({"session_id": session, "messages": [
+                    {"role": m.role, "content": m.content,
+                     "at": m.created_at.isoformat() if m.created_at else None} for m in rows]})
+        if customer_id:
+            row = await db.get(ShopperState, f"customer:{customer_id}")
+            out["saved_state"] = row.data if row else None
+    return out

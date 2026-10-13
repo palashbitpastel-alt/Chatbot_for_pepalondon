@@ -156,6 +156,10 @@ class Settings(BaseSettings):
     CLIENT_IP_HEADER: str = "x-real-ip"
     # The interactive API docs (/docs, /redoc, /openapi.json). Off in production.
     API_DOCS: bool = False
+    # A busy AI (rate limit, overload, timeout): the chat waits and asks again
+    # this many times before telling the shopper, waiting WAIT, then 2 x WAIT...
+    SUPPORT_AI_BUSY_RETRIES: int = 2
+    SUPPORT_AI_BUSY_WAIT_SECONDS: float = 4
     # Shopper conversations older than this are deleted (0 = kept for ever).
     SUPPORT_CHAT_RETENTION_DAYS: int = 90
 

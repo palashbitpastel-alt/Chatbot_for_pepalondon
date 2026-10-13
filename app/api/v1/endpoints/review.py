@@ -178,6 +178,17 @@ async def shades(colour: str = Query(..., min_length=2, max_length=40),
     return {"colour": colour, "shades": list(found), "seconds": round(time.monotonic() - started, 1)}
 
 
+@router.get("/review/customer-data")
+async def customer_data(email: str = Query(default="", max_length=255), customer_id: str = Query(default="", max_length=40),
+                        shop: str = Query(default="", max_length=255),
+                        x_review_key: str | None = Header(default=None)) -> dict:
+    """Everything kept about one customer, to answer Shopify's customers/data_request
+    (the server logs "ACTION NEEDED" when one arrives). Staff key needed."""
+    _check(x_review_key)
+    from app.services import retention, shops
+    return await retention.export_customer(shops.normalise(shop) or shops.current(), email, customer_id or None)
+
+
 @router.get("/review/status")
 async def status(x_review_key: str | None = Header(default=None)) -> dict:
     """Whether the AI can answer right now, and why the last chat failed."""

@@ -966,27 +966,48 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             # A second pass only when the first named products without calling a
             # single tool - see _named_without_looking. A pass that called any
             # tool is never re-run: it may have put something in their bag.
+            busy_tries = 0
             for attempt in range(2):
                 used_tools = False
-                async for event in CUSTOMER_SUPPORT_AGENT.stream(asking, history):
-                    if event["type"] == "tool":
-                        mark(f"tool_{event['phase']}:{event['name']}")
-                    elif event["type"] == "token":
-                        mark("first_token")
-                    if event["type"] == "token":
-                        yield _sse("token", {"text": event["text"]})
-                    elif event["type"] == "reset":
+                while True:
+                    try:
+                        async for event in CUSTOMER_SUPPORT_AGENT.stream(asking, history):
+                            if event["type"] == "tool":
+                                mark(f"tool_{event['phase']}:{event['name']}")
+                            elif event["type"] == "token":
+                                mark("first_token")
+                            if event["type"] == "token":
+                                yield _sse("token", {"text": event["text"]})
+                            elif event["type"] == "reset":
+                                yield _sse("reset", {})
+                            elif event["type"] == "tool":
+                                used_tools = True
+                                yield _sse("tool", {"name": event["name"], "phase": event["phase"],
+                                                    **({"input": event["input"]} if event.get("input") else {})})
+                                if event["phase"] == "end":
+                                    # Collected now, sent once the reply exists - see finalise().
+                                    cards.take(event["name"], event.get("output"))
+                            elif event["type"] == "final":
+                                mark(f"agent_done_{attempt}")
+                                reply, declared = split_show(_without_cards_note(event["reply"]))
+                        break
+                    except Exception as exc:  # noqa: BLE001 - re-raised unless it is a busy AI
+                        # A busy AI (rate limit, overload, timeout) usually clears in
+                        # seconds: wait and ask again, quietly, before the shopper is
+                        # told anything. Never once a tool has run - it may have put
+                        # something in their bag, and running it twice would do it twice.
+                        busy = service_health.classify(exc) in ("ai_busy", "ai_timeout")
+                        if not busy or used_tools or busy_tries >= settings.SUPPORT_AI_BUSY_RETRIES:
+                            raise
+                        busy_tries += 1
+                        wait = settings.SUPPORT_AI_BUSY_WAIT_SECONDS * busy_tries
+                        logger.info("Session %s: AI busy, asking again in %ss (try %s)", session_id, wait, busy_tries)
+                        mark(f"busy_retry_{busy_tries}")
                         yield _sse("reset", {})
-                    elif event["type"] == "tool":
-                        used_tools = True
-                        yield _sse("tool", {"name": event["name"], "phase": event["phase"],
-                                            **({"input": event["input"]} if event.get("input") else {})})
-                        if event["phase"] == "end":
-                            # Collected now, sent once the reply exists - see finalise().
-                            cards.take(event["name"], event.get("output"))
-                    elif event["type"] == "final":
-                        mark(f"agent_done_{attempt}")
-                        reply, declared = split_show(_without_cards_note(event["reply"]))
+                        await asyncio.sleep(wait)
+                        # Models resting after a rate limit get a fresh try too.
+                        from app.agent import base as agent_base
+                        agent_base._gemini_resting_until.clear()
                 if attempt or used_tools or not await _named_without_looking(
                         reply, req.cart, req.context.cards_on_screen if req.context else None):
                     break
@@ -1004,7 +1025,8 @@ async def support_chat(req: SupportChatRequest) -> StreamingResponse:
             code = service_health.shopper_code(kind)
             failed: dict = {"message": service_health.SHOPPER_MESSAGES[code], "code": code,
                             "retry": code in ("ai_busy", "unexpected"), "timing": timing}
-            if code == "ai_unavailable":
+            if code in ("ai_unavailable", "ai_busy"):
+                # What still works without the assistant, so it is never a dead end.
                 failed["offer_size"] = True
                 try:
                     found = await shopify_storefront.collections(

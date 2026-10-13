@@ -23,7 +23,8 @@ _last_failure: dict | None = None
 SHOPPER_MESSAGES = {
     "ai_unavailable": ("Our shopping assistant is taking a short break right now. You can still "
                        "browse our collections below, or find the right size with the size finder."),
-    "ai_busy": "The assistant is very busy at the moment - please try again in a minute.",
+    "ai_busy": ("I'm helping a lot of shoppers right now and need a moment - please ask me again shortly. "
+                "Meanwhile you can browse our collections below, or find the right size with the size finder."),
     "store_unreachable": "We can't reach the shop's catalogue just now - please try again in a minute.",
     "unexpected": "Sorry - something went wrong. Please try again.",
 }

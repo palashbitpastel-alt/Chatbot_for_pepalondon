@@ -222,3 +222,77 @@ def test_old_conversations_are_deleted_and_a_customer_can_be_forgotten():
             state = (await db.execute(select(ShopperState))).scalars().all()
         assert forgotten == {"conversations": 1, "state": 1} and left == {"cs_other00000", "staffthread01"} and not state
     run(go())
+
+
+def test_customer_data_export_needs_the_key_and_finds_their_conversations():
+    from app.services import retention
+
+    async def seed():
+        async with AsyncSessionLocal() as db:
+            db.add_all([ChatMessage(session_id="cs_export00000", role="user", content="I am sam@example.org, order 1001"),
+                        ChatMessage(session_id="cs_export00000", role="assistant", content="Found it"),
+                        ChatMessage(session_id="cs_notthem0000", role="user", content="nothing personal")])
+            await db.commit()
+    run(seed())
+    path = "/api/v1/review/customer-data?email=Sam@Example.org"
+    assert call("GET", path).status_code == 401
+    found = call("GET", path, headers=KEY).json()
+    assert [c["session_id"] for c in found["conversations"]] == ["cs_export00000"]
+    assert len(found["conversations"][0]["messages"]) == 2
+    run(retention.forget_customer("", "sam@example.org", None))
+    assert call("GET", path, headers=KEY).json()["conversations"] == []
+
+
+def _chat_events(monkeypatch, failures, tool_first=False):
+    """Run one shopper turn against an agent that is busy `failures` times."""
+    import json
+    from app.api.v1.endpoints import support
+    from app.agent.base import Agent
+
+    class Busy(RuntimeError):
+        status_code = 429
+
+    state = {"calls": 0}
+
+    async def stream(message, history):
+        state["calls"] += 1
+        if tool_first:
+            yield {"type": "tool", "name": "add_to_cart", "phase": "start"}
+        if state["calls"] <= failures:
+            raise Busy("rate limited")
+        yield {"type": "final", "reply": "Here you go."}
+
+    async def nothing(*a, **k):
+        return None
+    monkeypatch.setattr(support, "CUSTOMER_SUPPORT_AGENT", Agent(
+        name="customer_support", label="x", description="x", run=nothing, stream=stream))
+    monkeypatch.setattr(settings, "SUPPORT_AI_BUSY_WAIT_SECONDS", 0)
+    # No Shopify and no AI in tests: every lookup fails fast, as a shop that
+    # cannot be reached would, and the turn must still be answered.
+    from app.services import shopify_client
+
+    async def no_token():
+        raise shopify_client.ShopifyError("not configured in tests")
+    monkeypatch.setattr(shopify_client, "access_token", no_token)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "")
+    r = call("POST", "/api/v1/support/chat", ip="4.4.4.4", json={"message": "do you have coats"})
+    events = [b.split("\n")[0][7:] for b in r.text.split("\n\n") if b.startswith("event: ")]
+    error = next((json.loads(b.split("data: ", 1)[1]) for b in r.text.split("\n\n") if b.startswith("event: error")), None)
+    return state["calls"], events, error
+
+
+def test_a_busy_ai_is_asked_again_quietly(monkeypatch):
+    calls, events, error = _chat_events(monkeypatch, failures=2)
+    assert calls == 3 and error is None and "done" in events
+
+
+def test_still_busy_gives_a_kind_line_and_something_to_do(monkeypatch):
+    calls, events, error = _chat_events(monkeypatch, failures=99)
+    assert calls == 1 + settings.SUPPORT_AI_BUSY_RETRIES
+    assert error["code"] == "ai_busy" and error["offer_size"] is True and "very busy" not in error["message"]
+
+
+def test_a_turn_that_already_used_a_tool_is_never_run_twice(monkeypatch):
+    calls, events, error = _chat_events(monkeypatch, failures=99, tool_first=True)
+    assert calls == 1 and error["code"] == "ai_busy"
