@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 
 from app.api.v1.endpoints.support import SESSION_PREFIX, _without_cards_note
 from app.core.config import settings
+from app.core.security import check_admin_key
 from app.db.models import ChatMessage
 from app.db.session import AsyncSessionLocal
 from app.services import colours, lessons, replay, service_health, understanding
@@ -32,10 +33,13 @@ PAGE = Path(__file__).with_name("review_page.html")
 
 
 def _check(key: str | None) -> None:
-    if not settings.REVIEW_KEY:
-        raise HTTPException(status_code=503, detail="Set REVIEW_KEY on the server to open the review page.")
-    if not key or not hmac.compare_digest(key.encode(), settings.REVIEW_KEY.encode()):
-        raise HTTPException(status_code=401, detail="Wrong review key.")
+    # Constant-time compare, and repeated wrong keys lock the caller out.
+    check_admin_key(key)
+
+
+# Staff pages are never shown inside another site's frame.
+_NO_FRAME = {"Content-Security-Policy": "frame-ancestors 'none'", "X-Frame-Options": "DENY",
+             "Cache-Control": "no-store"}
 
 
 class Verdict(BaseModel):
@@ -47,7 +51,7 @@ class Verdict(BaseModel):
 
 @router.get("/review", response_class=HTMLResponse, include_in_schema=False)
 async def review_page() -> HTMLResponse:
-    return HTMLResponse(PAGE.read_text(encoding="utf-8"))
+    return HTMLResponse(PAGE.read_text(encoding="utf-8"), headers=_NO_FRAME)
 
 
 @router.get("/review/conversations")

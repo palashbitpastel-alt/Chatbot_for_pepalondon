@@ -445,6 +445,12 @@ async def find_order(order_number: str, email: str) -> dict:
     given_email = email.strip().casefold()
     if not given_email or "@" not in given_email:
         return {"found": False, "reason": "email_required"}
+    # Order numbers run in sequence and emails leak: a caller who keeps getting
+    # it wrong is guessing, and stops being answered (app/core/security).
+    from app.core import security
+    if security.guesses_blocked("order_lookup"):
+        return {"found": False, "reason": "too_many_attempts",
+                "tell_customer": "I could not match that order. Please contact us and we will look it up for you."}
 
     node = None
     for candidate in order_number_variants(order_number):
@@ -455,6 +461,7 @@ async def find_order(order_number: str, email: str) -> dict:
             break
 
     if node is None or (node.get("email") or "").strip().casefold() != given_email:
+        security.wrong_guess("order_lookup")
         return {"found": False, "reason": "no_match"}
 
     status = _fulfillment_status(node)

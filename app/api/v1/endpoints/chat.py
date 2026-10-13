@@ -18,13 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.cards import CardCollector
 from app.agent.registry import AGENTS, DEFAULT_AGENT, get_agent
+from app.core.security import require_admin
 from app.db.models import ChatMessage
 from app.db.session import AsyncSessionLocal, get_db
 from app.services import rag
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["chat"])
+# Staff only: the admin agent reads orders and finances, and any thread can be
+# read back by its id.
+router = APIRouter(tags=["chat"], dependencies=[Depends(require_admin)])
 
 HISTORY_LIMIT = 20
 

@@ -335,6 +335,11 @@ def _eligibility(node: dict, action: str) -> dict | None:
 # ── Step one ───────────────────────────────────────────────────────────────
 
 
+def _order_key(order_name: str) -> str:
+    from app.services import shops
+    return f"{shops.current()}|{order_name}"
+
+
 async def begin(order_number: str, email: str, action: str, session_id: str | None = None) -> dict:
     """Match the order, check the change is possible, and record it against the chat.
 
@@ -360,6 +365,11 @@ async def begin(order_number: str, email: str, action: str, session_id: str | No
     given_email = (email or "").strip().casefold()
     if not given_email or "@" not in given_email:
         return {"found": False, "reason": "email_required"}
+    # The same cap on guessing as a status lookup (app/core/security).
+    from app.core import security
+    if security.guesses_blocked("order_lookup"):
+        return {"found": False, "reason": "too_many_attempts",
+                "tell_customer": "I could not match that order. Please contact us and we will look it up for you."}
 
     node = None
     for candidate in order_number_variants(order_number):
@@ -372,7 +382,15 @@ async def begin(order_number: str, email: str, action: str, session_id: str | No
     # Same answer for a wrong email as for an order that is not there, so this
     # cannot be used to find out which order numbers exist.
     if node is None or (node.get("email") or "").strip().casefold() != given_email:
+        security.wrong_guess("order_lookup")
         return {"found": False, "reason": "no_match"}
+
+    # Wrong answers to this order's own question are counted on the order, not
+    # on the chat: a new chat used to bring three fresh tries at the postcode.
+    if security.guesses_blocked("order_change", _order_key(node["name"])):
+        return {"found": True, "eligible": False, "order_number": node["name"], "reason": "locked",
+                "tell_customer": ("For your security I cannot change this order from here just now. "
+                                  "Please contact us and we will do it for you.")}
 
     blocked = _eligibility(node, action)
     if blocked:
@@ -490,7 +508,14 @@ async def commit(
         }
 
     if settings.SUPPORT_VERIFY_ORDER_CHANGES and not row.verified:
+        from app.core import security
+        if security.guesses_blocked("order_change", _order_key(row.order_name)):
+            await _forget(session_id)
+            return {"done": False, "reason": "too_many_attempts",
+                    "tell_customer": ("That did not match what we have on the order, so I have stopped "
+                                      "there. Please contact us and we will sort it out properly.")}
         if not _answer_matches(row, verification_answer):
+            security.wrong_guess("order_change", _order_key(row.order_name))
             attempts = await _bump_attempts(session_id)
             left = settings.SUPPORT_CHANGE_MAX_ATTEMPTS - attempts
             if left <= 0:

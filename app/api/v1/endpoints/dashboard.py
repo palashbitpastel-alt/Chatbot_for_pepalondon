@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.security import require_admin
 
 from app.services import insights
 from app.services.insights import SUMMARY_FUNCS
 from app.services.shopify_store import fetch_store_snapshot
 
-router = APIRouter(tags=["dashboard"])
+# Staff only: every route here shows a shop's sales, stock and orders.
+router = APIRouter(tags=["dashboard"], dependencies=[Depends(require_admin)])
 
 
 @router.get("/dashboard/summary")

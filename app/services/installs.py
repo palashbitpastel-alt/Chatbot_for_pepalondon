@@ -168,6 +168,9 @@ def verify_id_token(id_token: str) -> str:
         claims = json.loads(_b64(body))
     except (ValueError, json.JSONDecodeError) as exc:
         raise InstallError("The install token is malformed.") from exc
+    # With no client secret every token would "verify" against an empty key.
+    if not settings.SHOPIFY_CLIENT_SECRET or not settings.SHOPIFY_CLIENT_ID:
+        raise InstallError("The app is not configured on the server.")
     if header.get("alg") != "HS256":
         raise InstallError("The install token uses an unexpected signature.")
     expected = hmac.new(settings.SHOPIFY_CLIENT_SECRET.encode(), f"{head}.{body}".encode(), hashlib.sha256).digest()

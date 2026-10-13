@@ -2,8 +2,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from app.core.security import SecurityMiddleware
 from app.services.shops import ShopMiddleware
 from sqlalchemy import text
 
@@ -81,6 +84,9 @@ async def lifespan(app: FastAPI):
     # Several copies of this server can run side by side: each re-reads the shops
     # every 30 s so billing and settings saved by one reach the others.
     asyncio.create_task(installs.keep_fresh())
+    # Old shopper conversations are deleted daily (SUPPORT_CHAT_RETENTION_DAYS).
+    from app.services import retention
+    asyncio.create_task(retention.keep_swept())
     # Every shop this backend serves, so a newly added shop's first question
     # does not wait for its whole catalogue to be read.
     for shop in sorted(shops.allowed()):
@@ -94,7 +100,18 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
+# The interactive docs list every endpoint; they open only where API_DOCS is on.
+app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan,
+              docs_url="/docs" if settings.API_DOCS else None,
+              redoc_url="/redoc" if settings.API_DOCS else None,
+              openapi_url="/openapi.json" if settings.API_DOCS else None)
+
+
+@app.exception_handler(RequestValidationError)
+async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # What was wrong and where - never the caller's input echoed back.
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": [str(p) for p in e.get("loc", ())], "msg": e.get("msg"), "type": e.get("type")} for e in exc.errors()]})
 
 # Which shop each request is for (see services/shops). Added before CORS so
 # CORS wraps it and a refused shop still gets a readable answer.
@@ -106,9 +123,15 @@ app.add_middleware(
     # `allow_origins=["*"]` is not an option here - the spec forbids pairing it
     # with credentials - so storefronts are matched by pattern.
     allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # No cookies are used anywhere: every call carries its own header (the shop,
+    # a Shopify session token, the staff key), so browsers send no credentials.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Shop-Domain", "X-Review-Key"],
 )
+
+# Outermost: sets the caller, applies the rate limits and adds the security
+# headers to every response, refusals included.
+app.add_middleware(SecurityMiddleware)
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)

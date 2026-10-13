@@ -2,10 +2,11 @@ import html
 import json
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.core.config import settings
+from app.core.security import require_admin
 from app.services import installs, insights, shopify_search, shops, widget_settings
 from app.services.shopify_store import fetch_store_snapshot, is_configured
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["shopify"])
 
 
-@router.get("/shopify/status")
+@router.get("/shopify/status", dependencies=[Depends(require_admin)])
 async def shopify_status() -> dict:
     """Connection state plus what the store's live data says (currency, granted
     scopes, where campaign data comes from). Nothing here is cached - it's a
@@ -92,9 +93,24 @@ async def shopify_webhooks(request: Request) -> JSONResponse:
         await installs.uninstall(shop)
     elif topic == "shop/redact":
         await installs.forget(shop)
-    # customers/data_request and customers/redact: chats are kept under random
-    # session ids with no customer link, so there is nothing tied to a customer
-    # to send or delete; Shopify needs the 200.
+        from app.services import retention
+        logger.info("Webhook shop/redact from %s: deleted %s", shop, await retention.forget_shop(shops.normalise(shop)))
+    elif topic in ("customers/redact", "customers/data_request"):
+        # Chats are kept under random ids, but shoppers type their email into
+        # them: a conversation that mentions this customer's email is theirs.
+        try:
+            customer = (json.loads(body or b"{}").get("customer") or {})
+        except ValueError:
+            customer = {}
+        if topic == "customers/redact":
+            from app.services import retention
+            gone = await retention.forget_customer(shops.normalise(shop), customer.get("email"),
+                                                   str(customer.get("id") or "") or None)
+            logger.info("Webhook customers/redact from %s: deleted %s", shop, gone)
+        else:
+            # Shopify gives 30 days to send the customer their data: flagged
+            # here for a person to act on (the id only - no email in the logs).
+            logger.warning("ACTION NEEDED: customers/data_request from %s for customer id %s", shop, customer.get("id"))
     logger.info("Webhook %s from %s", topic, shop)
     return JSONResponse({"ok": True})
 

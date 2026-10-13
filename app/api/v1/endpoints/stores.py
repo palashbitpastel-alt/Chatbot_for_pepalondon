@@ -15,7 +15,7 @@ from fastapi import APIRouter, Header
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from app.api.v1.endpoints.review import _check
+from app.api.v1.endpoints.review import _NO_FRAME, _check
 from app.services import billing, shops
 
 router = APIRouter(tags=["stores"])
@@ -41,7 +41,7 @@ class Plan(BaseModel):
 
 @router.get("/stores", response_class=HTMLResponse, include_in_schema=False)
 async def stores_page() -> HTMLResponse:
-    return HTMLResponse(PAGE.read_text(encoding="utf-8"))
+    return HTMLResponse(PAGE.read_text(encoding="utf-8"), headers=_NO_FRAME)
 
 
 @router.get("/stores/list")

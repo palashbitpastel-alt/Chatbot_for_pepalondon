@@ -140,6 +140,25 @@ class Settings(BaseSettings):
     # A signature older than this is refused, so a copied page cannot be replayed.
     SUPPORT_CUSTOMER_SIGNATURE_MAX_AGE_HOURS: int = 24
 
+    # ── Security (app/core/security.py). 0 switches a limit off. ──
+    # Requests per minute from one caller (IP), to anything but health checks
+    # and signed webhooks; chat messages per minute from one caller; and chat
+    # messages per minute to one shop from everybody together.
+    RATE_LIMIT_PER_MINUTE: int = 240
+    RATE_LIMIT_CHAT_PER_MINUTE: int = 30
+    RATE_LIMIT_SHOP_CHAT_PER_MINUTE: int = 300
+    # Wrong guesses - the admin key, an order's email, an order's postcode -
+    # allowed per caller (and per order) in a window before they are locked out.
+    GUESS_MAX_FAILURES: int = 8
+    GUESS_WINDOW_MINUTES: int = 30
+    # The header the host's proxy puts the caller's address in (Railway:
+    # X-Real-IP). Empty: the first X-Forwarded-For address, else the socket's.
+    CLIENT_IP_HEADER: str = "x-real-ip"
+    # The interactive API docs (/docs, /redoc, /openapi.json). Off in production.
+    API_DOCS: bool = False
+    # Shopper conversations older than this are deleted (0 = kept for ever).
+    SUPPORT_CHAT_RETENTION_DAYS: int = 90
+
     # Opens the answer review page (/api/v1/review). The owner marks the assistant's
     # answers good or wrong there and those verdicts guide later answers. Empty
     # keeps the page closed.

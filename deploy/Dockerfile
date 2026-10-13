@@ -15,6 +15,10 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY app ./app
 
+# Not root: a bug in the app cannot rewrite the image it runs from.
+RUN useradd --create-home --uid 10001 app
+USER app
+
 # Hosts pass the port in $PORT; 8000 when run by hand.
 ENV PORT=8000
 EXPOSE 8000
